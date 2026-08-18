@@ -82,28 +82,6 @@ export const Header: React.FC<HeaderProps> = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleConfigureTurn = async () => {
-    try {
-      const existing = localStorage.getItem('cinesync_custom_turn') || '';
-      const input = window.prompt('Paste TURN/STUN JSON (e.g. {"urls":"turn:turn.example:3478","username":"user","credential":"pass"}) or leave empty to clear:', existing);
-      if (input === null) return; // cancelled
-      if (!input.trim()) {
-        localStorage.removeItem('cinesync_custom_turn');
-        alert('Custom TURN cleared. Reloading to apply.');
-        window.location.reload();
-        return;
-      }
-      const parsed = JSON.parse(input);
-      // basic validation
-      if (!parsed.urls) throw new Error('Missing "urls" field');
-      localStorage.setItem('cinesync_custom_turn', JSON.stringify(parsed));
-      alert('Custom TURN saved. Reloading to apply.');
-      window.location.reload();
-    } catch (e: any) {
-      alert('Invalid TURN JSON: ' + (e?.message || e));
-    }
-  };
-
 
   // Close participants dropdown when clicking outside
   useEffect(() => {
@@ -199,6 +177,20 @@ export const Header: React.FC<HeaderProps> = ({
         >
           <Shield size={14} />
           <span className="btn-label">Network</span>
+        </button>
+
+        {/* Force Relay toggle (uses localStorage cinesync_force_relay) */}
+        <button
+          className={`header-action-btn ${localStorage.getItem('cinesync_force_relay') ? 'active' : ''}`}
+          onClick={() => {
+            const cur = !!localStorage.getItem('cinesync_force_relay');
+            if (cur) localStorage.removeItem('cinesync_force_relay'); else localStorage.setItem('cinesync_force_relay', '1');
+            window.location.reload();
+          }}
+          title="Toggle Force TURN Relay (persisted locally)"
+        >
+          <Shield size={14} />
+          <span className="btn-label">Force Relay</span>
         </button>
 
         <TurnModal isOpen={showNetworkModal} onClose={() => setShowNetworkModal(false)} />

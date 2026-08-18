@@ -1262,6 +1262,14 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
       peerOptions.secure = true;
     }
 
+    // Honor local Force Relay toggle from UI
+    try {
+      if (typeof window !== 'undefined' && localStorage.getItem('cinesync_force_relay')) {
+        peerOptions.config.iceTransportPolicy = 'relay';
+        relayModeRef.current = true;
+      }
+    } catch {}
+
     if (relayModeRef.current) {
       // force ICE to use relay candidates only
       peerOptions.config.iceTransportPolicy = 'relay';
