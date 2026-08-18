@@ -1,0 +1,32 @@
+version: '3.8'
+services:
+  peerjs-server:
+    image: peerjs/peerjs-server:latest
+    restart: unless-stopped
+    environment:
+      - PORT=9000
+    ports:
+      - "9000:9000"
+    command: --port 9000
+
+  coturn:
+    image: instrumentisto/coturn:latest
+    restart: unless-stopped
+    ports:
+      - "3478:3478"
+      - "3478:3478/udp"
+      - "5349:5349"
+      - "5349:5349/udp"
+    environment:
+      - REALM=example.com
+      - LISTEN=0.0.0.0
+      - EXTERNAL_IP=
+    # For production, provide a secure username/password via TURN_USERS env or a mounted turnserver.conf
+    # Example to use static users (not recommended for prod):
+    # - TURN_USERS=user1:pass1
+    command: ["-n", "--log-file=stdout", "--no-cli", "--lt-cred-mech"]
+
+# Notes:
+# - This compose file provides a minimal local PeerServer + Coturn stack for testing.
+# - Configure coturn with real credentials and external IP for production.
+# - Update the app's ICE/STUN/TURN list to point to your TURN relay (e.g. turn:your-host:3478) or use the Header UI to paste JSON.

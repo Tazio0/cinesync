@@ -144,6 +144,7 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
   const scanIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const heartbeatIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const statsIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const connectRetryRef = useRef<Map<string, number>>(new Map());
   
   const currentSlotRef = useRef<number>(1);
   const cleanRoomIdRef = useRef<string>('');
@@ -731,6 +732,27 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
       metadata: { name: currentUserRef.current.name, device: getDeviceType() },
     });
     setupDataConnection(conn);
+
+    // On connection close/error, attempt a small number of retries with exponential backoff
+    const scheduleRetryForSlot = () => {
+      const prev = connectRetryRef.current.get(slotId) || 0;
+      if (prev >= 3) {
+        connectRetryRef.current.delete(slotId);
+        return;
+      }
+      connectRetryRef.current.set(slotId, prev + 1);
+      const delay = Math.min(8, Math.pow(2, prev)) * 1000; // 1s,2s,4s
+      setTimeout(() => {
+        connectToSlot(slotId);
+      }, delay);
+    };
+
+    conn.on('close', () => {
+      scheduleRetryForSlot();
+    });
+    conn.on('error', () => {
+      scheduleRetryForSlot();
+    });
   }, [setupDataConnection]);
 
   // Scan all other room slots to establish full mesh
@@ -1161,14 +1183,28 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
 
     const iceServers = getActiveIceServers();
 
-    const peer = new Peer(mySlotId, {
+    const peerOptions = {
       debug: 1,
       config: {
         iceServers,
         iceCandidatePoolSize: 10,
         sdpSemantics: 'unified-plan',
       },
-    });
+      // Prefer the public PeerJS signaling cloud as a fallback for strict networks
+      host: '0.peerjs.com',
+      port: 443,
+      path: '/',
+      secure: true,
+    } as any;
+
+    let peer: Peer;
+    try {
+      peer = new Peer(mySlotId, peerOptions);
+    } catch (e) {
+      // Fallback: try without explicit signaling host (use library defaults)
+      console.warn('[P2P Mesh] Peer constructor with explicit host failed, retrying without host', e);
+      peer = new Peer(mySlotId, { debug: 1, config: peerOptions.config });
+    }
 
     peer.on('open', (id) => {
       console.log(`[P2P Mesh] Peer successfully opened on slot ${slotIndex} with ID: ${id}`);
