@@ -180,7 +180,25 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
         }
       }
 
-      // 2) localStorage override (user-pasted TURN JSON in UI)
+      // 2) localStorage override (user-pasted TURN JSON in UI - new format supports multiple entries)
+      const turnsListStr = localStorage.getItem('cinesync_turns');
+      if (turnsListStr) {
+        try {
+          const turnsList: TurnServerConfig[] = JSON.parse(turnsListStr);
+          if (Array.isArray(turnsList) && turnsList.length > 0) {
+            const parsed = turnsList.map((t) => ({
+              urls: t.urls.split(',').map((u) => u.trim()),
+              ...(t.username ? { username: t.username } : {}),
+              ...(t.credential ? { credential: t.credential } : {}),
+            } as RTCIceServer));
+            return [...parsed, ...DEFAULT_ICE_SERVERS];
+          }
+        } catch (e) {
+          // fallthrough to legacy key
+        }
+      }
+
+      // legacy single-entry support
       const customTurnStr = localStorage.getItem('cinesync_custom_turn');
       if (customTurnStr) {
         const customTurn: TurnServerConfig = JSON.parse(customTurnStr);

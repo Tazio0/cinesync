@@ -3,7 +3,6 @@ import puppeteer from 'puppeteer';
 (async () => {
   const browser = await puppeteer.launch({
     headless: 'new',
-    executablePath: '/usr/bin/google-chrome-stable',
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--use-fake-ui-for-media-stream']
   });
 
@@ -20,7 +19,9 @@ import puppeteer from 'puppeteer';
     logPage(page1, 'P1');
     logPage(page2, 'P2');
 
-    await page1.goto('http://localhost:5173', { waitUntil: 'networkidle2', timeout: 60000 });
+    const TARGET = process.env.TARGET_URL || process.env.VERCEL_URL || 'http://localhost:5173';
+    const url = TARGET.startsWith('http') ? TARGET : `https://${TARGET}`;
+    await page1.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
     await page1.waitForSelector('.btn-lobby-primary', { timeout: 10000 });
     await page1.click('.btn-lobby-primary');
     console.log('P1: Created room');
@@ -36,7 +37,7 @@ import puppeteer from 'puppeteer';
     }
 
     // Open page2 with the room hash to join
-    const joinUrl = `http://localhost:5173/#room=${roomParam}`;
+    const joinUrl = `${url.replace(/\/$/, '')}/#room=${roomParam}`;
     await page2.goto(joinUrl, { waitUntil: 'networkidle2', timeout: 60000 });
     console.log('P2: navigated to join url');
 
