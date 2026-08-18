@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Play, Pause, Volume2, VolumeX, Maximize2, Minimize, RotateCcw, RotateCw, Sparkles } from 'lucide-react';
+import { Play, Pause, Volume2, VolumeX, Maximize2, Minimize, RotateCcw, RotateCw, Sparkles, Square } from 'lucide-react';
 import type { SyncMediaState } from '../types';
 
 interface YouTubeSyncPlayerProps {
@@ -9,6 +9,7 @@ interface YouTubeSyncPlayerProps {
   onSyncAction: (action: 'play' | 'pause' | 'seek' | 'change_source', state: Partial<SyncMediaState>) => void;
   isFullscreen: boolean;
   onToggleFullscreen: () => void;
+  onStopMedia?: () => void;
 }
 
 declare global {
@@ -66,6 +67,7 @@ export const YouTubeSyncPlayer: React.FC<YouTubeSyncPlayerProps> = ({
   onSyncAction,
   isFullscreen,
   onToggleFullscreen,
+  onStopMedia,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const playerRef = useRef<any>(null);
@@ -420,6 +422,16 @@ export const YouTubeSyncPlayer: React.FC<YouTubeSyncPlayerProps> = ({
 
           <div className="controls-right">
             <span className="video-sync-title">{videoTitle}</span>
+            {onStopMedia && (
+              <button
+                className="control-btn stop-stream-btn-compact"
+                onClick={onStopMedia}
+                title="Stop Video & Return to Stage"
+              >
+                <Square size={14} fill="currentColor" />
+                <span className="btn-label">Stop</span>
+              </button>
+            )}
             <button
               className="control-btn"
               onClick={onToggleFullscreen}

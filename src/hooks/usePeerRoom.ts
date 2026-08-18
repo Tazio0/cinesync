@@ -514,6 +514,64 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
           }
         }
         break;
+
+      case 'stop_media':
+        if (localScreenStreamRef.current) {
+          localScreenStreamRef.current.getTracks().forEach((t) => t.stop());
+          setLocalScreenStream(null);
+          localScreenStreamRef.current = null;
+        }
+        screenCallsRef.current.forEach((c) => c.close());
+        screenCallsRef.current.clear();
+        setCurrentUser((prev) => ({ ...prev, isScreenSharing: false }));
+
+        setSyncState({
+          type: 'idle',
+          url: '',
+          title: '',
+          isPlaying: false,
+          currentTime: 0,
+          duration: 0,
+          playbackRate: 1,
+          lastUpdatedBy: data.stoppedBy || '',
+          streamerId: '',
+          streamerName: '',
+          hasAudio: false,
+          timestamp: Date.now(),
+        });
+
+        if (data.stoppedBy) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `${Date.now()}-stop`,
+              senderId: 'system',
+              senderName: 'System',
+              avatarColor: '#F59E0B',
+              text: `${data.stoppedBy} stopped the stream.`,
+              timestamp: Date.now(),
+              type: 'system',
+            },
+          ]);
+        }
+        break;
+
+      case 'kick':
+        if (data.targetId === currentUserRef.current.id) {
+          if (localScreenStreamRef.current) {
+            localScreenStreamRef.current.getTracks().forEach((t) => t.stop());
+          }
+          if (localCamStreamRef.current) {
+            localCamStreamRef.current.getTracks().forEach((t) => t.stop());
+          }
+          if (peerRef.current) {
+            peerRef.current.destroy();
+          }
+          setIsConnected(false);
+          setConnectionStatus('error');
+          setStatusMessage('You were removed from the watch party by the host.');
+        }
+        break;
     }
   }, [callPeerWithActiveStreams]);
 
@@ -865,6 +923,112 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
       };
     }
   }, [broadcast, stopScreenShare]);
+
+  // Stop any active media / stream in the room and return to Cinema stage
+  const stopCurrentMedia = useCallback(() => {
+    if (localScreenStreamRef.current) {
+      localScreenStreamRef.current.getTracks().forEach((t) => t.stop());
+      setLocalScreenStream(null);
+      localScreenStreamRef.current = null;
+    }
+    screenCallsRef.current.forEach((call) => call.close());
+    screenCallsRef.current.clear();
+
+    setCurrentUser((prev) => ({ ...prev, isScreenSharing: false }));
+
+    const idleState: SyncMediaState = {
+      type: 'idle',
+      url: '',
+      title: '',
+      isPlaying: false,
+      currentTime: 0,
+      duration: 0,
+      playbackRate: 1,
+      lastUpdatedBy: currentUserRef.current.name,
+      streamerId: '',
+      streamerName: '',
+      hasAudio: false,
+      timestamp: Date.now(),
+    };
+
+    setSyncState(idleState);
+
+    broadcast({
+      type: 'stop_media',
+      stoppedBy: currentUserRef.current.name,
+    });
+
+    broadcast({
+      type: 'stream_status',
+      streamType: 'idle',
+      isLive: false,
+      streamerId: '',
+      streamerName: '',
+      title: '',
+    });
+
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `${Date.now()}-stop`,
+        senderId: 'system',
+        senderName: 'System',
+        avatarColor: '#F59E0B',
+        text: `${currentUserRef.current.name} stopped the stream.`,
+        timestamp: Date.now(),
+        type: 'system',
+      },
+    ]);
+  }, [broadcast]);
+
+  // Kick / remove a participant from the room (Host only)
+  const kickPeer = useCallback((targetPeerId: string) => {
+    const targetUser = peers.find((p) => p.id === targetPeerId);
+    const targetName = targetUser?.name || 'User';
+
+    // 1. Notify the peer
+    const conn = connectionsRef.current.get(targetPeerId);
+    if (conn && conn.open) {
+      try {
+        conn.send({
+          type: 'kick',
+          targetId: targetPeerId,
+          reason: 'Removed by host',
+        });
+      } catch {}
+      setTimeout(() => {
+        conn.close();
+      }, 200);
+    }
+
+    // 2. Close media calls
+    const screenCall = screenCallsRef.current.get(targetPeerId);
+    if (screenCall) screenCall.close();
+    screenCallsRef.current.delete(targetPeerId);
+
+    const camCall = camCallsRef.current.get(targetPeerId);
+    if (camCall) camCall.close();
+    camCallsRef.current.delete(targetPeerId);
+
+    // 3. Remove from internal sets
+    connectionsRef.current.delete(targetPeerId);
+    knownPeersRef.current.delete(targetPeerId);
+    setPeers((prev) => prev.filter((p) => p.id !== targetPeerId));
+
+    // 4. Post announcement
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `${Date.now()}-kick-${targetPeerId}`,
+        senderId: 'system',
+        senderName: 'System',
+        avatarColor: '#EF4444',
+        text: `${targetName} was removed from the room by the host.`,
+        timestamp: Date.now(),
+        type: 'system',
+      },
+    ]);
+  }, [peers]);
 
   // Start Camera Stream as Main Stage (especially useful on Mobile / Tablets)
   const startCameraMainStream = useCallback(async (facingMode: 'user' | 'environment' = 'environment') => {
@@ -1236,8 +1400,10 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
     startDualCountdown,
     startScreenShare,
     stopScreenShare,
+    stopCurrentMedia,
     startLocalFileStream,
     startCameraMainStream,
     toggleCamera,
+    kickPeer,
   };
 }

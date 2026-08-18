@@ -71,9 +71,11 @@ export function App() {
     startDualCountdown,
     startScreenShare,
     stopScreenShare,
+    stopCurrentMedia,
     startLocalFileStream,
     startCameraMainStream,
     toggleCamera,
+    kickPeer,
   } = usePeerRoom({
     userName,
     initialRoomId: activeRoomId,
@@ -257,6 +259,8 @@ export function App() {
         onToggleGlow={() => setAmbientGlow((prev) => !prev)}
         peers={peers}
         currentUser={currentUser}
+        onStopMedia={stopCurrentMedia}
+        onKickPeer={kickPeer}
       />
 
       {/* Main Layout Area */}
@@ -279,6 +283,7 @@ export function App() {
             peers={peers}
             onStartScreenShare={handleSelectScreenShare}
             onStopScreenShare={stopScreenShare}
+            onStopMedia={stopCurrentMedia}
             onStartCameraMainStream={handleSelectCameraStream}
             onOpenMediaModal={() => setIsMediaModalOpen(true)}
             onOpenNetflixGuide={() => setIsNetflixGuideOpen(true)}

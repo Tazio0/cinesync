@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   Tv, 
   Volume2, 
@@ -11,8 +11,13 @@ import {
   Film, 
   Copy, 
   Check, 
-  Users,
-  Activity
+  Users, 
+  Activity,
+  Square,
+  UserX,
+  Shield,
+  Smartphone,
+  Laptop
 } from 'lucide-react';
 import type { StreamType, User, ConnectionStats } from '../types';
 import { soundFX } from '../utils/soundEffects';
@@ -34,6 +39,8 @@ interface HeaderProps {
   onToggleGlow: () => void;
   peers: User[];
   currentUser: User;
+  onStopMedia?: () => void;
+  onKickPeer?: (peerId: string) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -52,9 +59,13 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleGlow,
   peers,
   currentUser,
+  onStopMedia,
+  onKickPeer,
 }) => {
   const [isMuted, setIsMuted] = useState<boolean>(soundFX.getMuted());
   const [copied, setCopied] = useState<boolean>(false);
+  const [showParticipantsDropdown, setShowParticipantsDropdown] = useState<boolean>(false);
+  const dropdownRef = useRef<HTMLDivElement | null>(null);
 
   const toggleMute = () => {
     const next = !isMuted;
@@ -68,6 +79,21 @@ export const Header: React.FC<HeaderProps> = ({
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
+  // Close participants dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setShowParticipantsDropdown(false);
+      }
+    };
+    if (showParticipantsDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showParticipantsDropdown]);
 
   const getStreamBadge = () => {
     switch (streamType) {
@@ -97,6 +123,12 @@ export const Header: React.FC<HeaderProps> = ({
         return 'dot-amber';
       default:
         return 'dot-red';
+    }
+  };
+
+  const handleKickClick = (peerId: string, peerName: string) => {
+    if (window.confirm(`Are you sure you want to remove ${peerName} from the watch party?`)) {
+      if (onKickPeer) onKickPeer(peerId);
     }
   };
 
@@ -141,30 +173,123 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       <div className="header-right">
-        {/* Active Participants */}
-        <div className="participants-stack" title={`${totalUsers} active participant(s)`}>
+        {/* Active Participants Stack & Dropdown */}
+        <div className="participants-wrapper" ref={dropdownRef}>
           <div 
-            className="user-avatar-small" 
-            style={{ backgroundColor: currentUser.avatarColor }}
-            title={`${currentUser.name} (You)`}
+            className="participants-stack" 
+            onClick={() => setShowParticipantsDropdown((prev) => !prev)}
+            title="Click to view and manage participants"
           >
-            {currentUser.name.charAt(0).toUpperCase()}
-          </div>
-          {peers.map((peer) => (
-            <div
-              key={peer.id}
-              className="user-avatar-small"
-              style={{ backgroundColor: peer.avatarColor }}
-              title={`${peer.name}`}
+            <div 
+              className="user-avatar-small" 
+              style={{ backgroundColor: currentUser.avatarColor }}
+              title={`${currentUser.name} (You)`}
             >
-              {peer.name.charAt(0).toUpperCase()}
+              {currentUser.name.charAt(0).toUpperCase()}
             </div>
-          ))}
-          <div className="users-count-tag">
-            <Users size={12} />
-            <span>{totalUsers}</span>
+            {peers.map((peer) => (
+              <div
+                key={peer.id}
+                className="user-avatar-small"
+                style={{ backgroundColor: peer.avatarColor }}
+                title={`${peer.name}`}
+              >
+                {peer.name.charAt(0).toUpperCase()}
+              </div>
+            ))}
+            <div className="users-count-tag">
+              <Users size={12} />
+              <span>{totalUsers}</span>
+            </div>
           </div>
+
+          {/* Participants Dropdown */}
+          {showParticipantsDropdown && (
+            <div className="participants-popover-dropdown">
+              <div className="popover-header">
+                <h4>Room Members ({totalUsers})</h4>
+              </div>
+              <div className="popover-list">
+                {/* You */}
+                <div className="popover-user-row">
+                  <div className="popover-avatar" style={{ backgroundColor: currentUser.avatarColor }}>
+                    {currentUser.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="popover-user-info">
+                    <div className="user-name-line">
+                      <span className="user-name-text">{currentUser.name}</span>
+                      <span className="you-pill">You</span>
+                      {currentUser.isHost && (
+                        <span className="host-pill" title="Room Host">
+                          <Shield size={10} />
+                          <span>Host</span>
+                        </span>
+                      )}
+                    </div>
+                    <span className="device-info-sub">
+                      {currentUser.deviceType === 'desktop' ? <Laptop size={11} /> : <Smartphone size={11} />}
+                      <span>{currentUser.deviceType}</span>
+                    </span>
+                  </div>
+                </div>
+
+                {/* Connected Peers */}
+                {peers.length === 0 ? (
+                  <div className="empty-peers-notice">
+                    <span>Waiting for friends to join... Share invite link!</span>
+                  </div>
+                ) : (
+                  peers.map((peer) => (
+                    <div key={peer.id} className="popover-user-row">
+                      <div className="popover-avatar" style={{ backgroundColor: peer.avatarColor }}>
+                        {peer.name.charAt(0).toUpperCase()}
+                      </div>
+                      <div className="popover-user-info">
+                        <div className="user-name-line">
+                          <span className="user-name-text">{peer.name}</span>
+                          {peer.isHost && (
+                            <span className="host-pill" title="Room Host">
+                              <Shield size={10} />
+                              <span>Host</span>
+                            </span>
+                          )}
+                        </div>
+                        <span className="device-info-sub">
+                          {peer.deviceType === 'desktop' ? <Laptop size={11} /> : <Smartphone size={11} />}
+                          <span>{peer.ping ? `${peer.ping}ms` : 'Connected'}</span>
+                        </span>
+                      </div>
+
+                      {/* Kick Button (Host Only) */}
+                      {currentUser.isHost && !peer.isHost && onKickPeer && (
+                        <button 
+                          className="btn-kick-peer"
+                          onClick={() => handleKickClick(peer.id, peer.name)}
+                          title={`Remove ${peer.name} from room`}
+                        >
+                          <UserX size={14} />
+                          <span>Kick</span>
+                        </button>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
         </div>
+
+        {/* Stop Stream Button (Active Media) */}
+        {streamType !== 'idle' && onStopMedia && (
+          <button 
+            className="header-action-btn stop-media-btn"
+            onClick={onStopMedia}
+            title="Stop Current Stream & Return to Stage"
+          >
+            <Square size={14} fill="currentColor" />
+            <span className="btn-label">Stop Stream</span>
+          </button>
+        )}
 
         {/* Source Switcher */}
         <button 

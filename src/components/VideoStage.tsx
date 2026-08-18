@@ -16,7 +16,8 @@ import {
   Maximize2,
   Camera,
   Activity,
-  Layers
+  Layers,
+  Square
 } from 'lucide-react';
 import type { 
   StreamType, 
@@ -46,6 +47,7 @@ interface VideoStageProps {
   peers: User[];
   onStartScreenShare: () => void;
   onStopScreenShare: () => void;
+  onStopMedia?: () => void;
   onStartCameraMainStream: () => void;
   onOpenMediaModal: () => void;
   onOpenNetflixGuide: () => void;
@@ -68,6 +70,7 @@ export const VideoStage: React.FC<VideoStageProps> = ({
   peers,
   onStartScreenShare,
   onStopScreenShare,
+  onStopMedia,
   onStartCameraMainStream,
   onOpenMediaModal,
   onOpenNetflixGuide,
@@ -536,6 +539,16 @@ export const VideoStage: React.FC<VideoStageProps> = ({
 
                 <div className="controls-right">
                   <span className="video-sync-title">{syncState.title}</span>
+                  {onStopMedia && (
+                    <button 
+                      className="control-btn stop-stream-btn-compact" 
+                      onClick={onStopMedia} 
+                      title="Stop Movie & Return to Stage"
+                    >
+                      <Square size={14} fill="currentColor" />
+                      <span className="btn-label">Stop</span>
+                    </button>
+                  )}
                   <button 
                     className="control-btn" 
                     onClick={cycleViewMode} 
@@ -565,6 +578,7 @@ export const VideoStage: React.FC<VideoStageProps> = ({
             onSyncAction={onSyncAction}
             isFullscreen={isFullscreen}
             onToggleFullscreen={toggleFullscreen}
+            onStopMedia={onStopMedia}
           />
         )}
 

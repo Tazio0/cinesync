@@ -94,5 +94,7 @@ export type PeerSignalData =
   | { type: 'dual_countdown'; count: number; active: boolean; initiator: string }
   | { type: 'stream_status'; streamType: StreamType; isLive: boolean; streamerId: string; streamerName: string; title: string; hasAudio?: boolean }
   | { type: 'request_stream'; requestedBy: string }
+  | { type: 'stop_media'; stoppedBy?: string }
+  | { type: 'kick'; targetId: string; reason?: string }
   | { type: 'ping'; timestamp: number }
   | { type: 'pong'; originTimestamp: number };
