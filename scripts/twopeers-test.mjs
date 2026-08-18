@@ -3,6 +3,7 @@ import puppeteer from 'puppeteer';
 (async () => {
   const browser = await puppeteer.launch({
     headless: 'new',
+    protocolTimeout: 120000,
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--use-fake-ui-for-media-stream']
   });
 
@@ -26,8 +27,8 @@ import puppeteer from 'puppeteer';
     await page1.click('.btn-lobby-primary');
     console.log('P1: Created room');
 
-    // wait for peer id to open and URL hash to be set
-    await new Promise((r) => setTimeout(r, 1500));
+    // wait for peer id to open and URL hash to be set (give it time)
+    await page1.waitForFunction(() => !!(window.location && window.location.hash && window.location.hash.includes('#room=')), { timeout: 60000 }).catch(() => {});
     const hash = await page1.evaluate(() => window.location.hash || '');
     console.log('P1 Hash:', hash);
 
