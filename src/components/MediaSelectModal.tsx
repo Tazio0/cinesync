@@ -8,15 +8,18 @@ import {
   Sparkles, 
   Play, 
   Clock, 
-  Timer
+  Timer,
+  Camera
 } from 'lucide-react';
 import type { SampleMedia } from '../types';
 import { SAMPLE_MOVIES } from '../utils/sampleMedia';
+import { isScreenShareSupported } from '../utils/deviceInfo';
 
 interface MediaSelectModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSelectScreenShare: () => void;
+  onSelectCameraStream: () => void;
   onSelectVideoUrl: (url: string, title: string) => void;
   onSelectYouTube: (url: string) => void;
   onSelectLocalFile: (file: File) => void;
@@ -28,13 +31,17 @@ export const MediaSelectModal: React.FC<MediaSelectModalProps> = ({
   isOpen,
   onClose,
   onSelectScreenShare,
+  onSelectCameraStream,
   onSelectVideoUrl,
   onSelectYouTube,
   onSelectLocalFile,
   onSelectDualSync,
   onSelectSampleMovie,
 }) => {
-  const [activeTab, setActiveTab] = useState<'screen' | 'url' | 'youtube' | 'local' | 'sample' | 'dual'>('screen');
+  const isScreenSupported = isScreenShareSupported();
+  const [activeTab, setActiveTab] = useState<'screen' | 'camera' | 'url' | 'youtube' | 'local' | 'sample' | 'dual'>(
+    isScreenSupported ? 'screen' : 'camera'
+  );
   const [customUrl, setCustomUrl] = useState<string>('');
   const [customTitle, setCustomTitle] = useState<string>('');
   const [youtubeUrl, setYoutubeUrl] = useState<string>('');
@@ -69,7 +76,7 @@ export const MediaSelectModal: React.FC<MediaSelectModalProps> = ({
         <div className="modal-header">
           <div className="modal-title-wrap">
             <span className="modal-badge-amber">Playback Source</span>
-            <h2>Select What to Watch</h2>
+            <h2>Select What to Stream & Watch</h2>
           </div>
           <button className="modal-close-btn" onClick={onClose} aria-label="Close modal">
             <X size={20} />
@@ -78,12 +85,21 @@ export const MediaSelectModal: React.FC<MediaSelectModalProps> = ({
 
         {/* Tab switcher */}
         <div className="media-tabs-nav">
+          {isScreenSupported && (
+            <button
+              className={`media-tab-btn ${activeTab === 'screen' ? 'active' : ''}`}
+              onClick={() => setActiveTab('screen')}
+            >
+              <Tv size={16} />
+              <span>Share Screen</span>
+            </button>
+          )}
           <button
-            className={`media-tab-btn ${activeTab === 'screen' ? 'active' : ''}`}
-            onClick={() => setActiveTab('screen')}
+            className={`media-tab-btn ${activeTab === 'camera' ? 'active' : ''}`}
+            onClick={() => setActiveTab('camera')}
           >
-            <Tv size={16} />
-            <span>Netflix Tab</span>
+            <Camera size={16} />
+            <span>Live Camera</span>
           </button>
           <button
             className={`media-tab-btn ${activeTab === 'sample' ? 'active' : ''}`}
@@ -130,9 +146,9 @@ export const MediaSelectModal: React.FC<MediaSelectModalProps> = ({
                 <div className="hero-icon-netflix">
                   <Tv size={36} />
                 </div>
-                <h3>Share Netflix Tab with Audio</h3>
+                <h3>Share Screen / Netflix Tab with Stereo Audio</h3>
                 <p>
-                  Broadcast your Netflix, Disney+, Prime Video, or HBO Max tab directly in 1080p 60fps with clear audio.
+                  Broadcast your Netflix, YouTube, browser tab, or entire desktop across networks in 1080p 60fps with clear stereo audio.
                 </p>
                 <button
                   className="btn-primary-netflix hero-action"
@@ -142,10 +158,39 @@ export const MediaSelectModal: React.FC<MediaSelectModalProps> = ({
                   }}
                 >
                   <Tv size={18} />
-                  <span>Start Sharing Netflix Tab</span>
+                  <span>Start Sharing Screen Now</span>
                 </button>
                 <div className="pane-helper-note">
-                  Tip: Remember to check <strong>"Also share tab audio"</strong> in the browser prompt.
+                  Tip: When the browser dialog pops up, choose <strong>"Chrome Tab"</strong> and check <strong>"Also share tab audio"</strong> for crisp movie sound.
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* LIVE CAMERA BROADCAST */}
+          {activeTab === 'camera' && (
+            <div className="tab-pane camera-pane">
+              <div className="pane-hero-card">
+                <div className="hero-icon-camera" style={{ color: '#10B981' }}>
+                  <Camera size={36} />
+                </div>
+                <h3>Broadcast Live Camera & Mic</h3>
+                <p>
+                  Stream your mobile or webcam video + audio directly to everyone in the room. Works on any smartphone, tablet, or laptop.
+                </p>
+                <button
+                  className="btn-primary hero-action"
+                  style={{ background: '#10B981' }}
+                  onClick={() => {
+                    onClose();
+                    onSelectCameraStream();
+                  }}
+                >
+                  <Camera size={18} />
+                  <span>Start Camera Live Stream</span>
+                </button>
+                <div className="pane-helper-note">
+                  Perfect for mobile streaming, presentations, watch party reactions, and live demonstrations.
                 </div>
               </div>
             </div>
@@ -187,7 +232,7 @@ export const MediaSelectModal: React.FC<MediaSelectModalProps> = ({
             <div className="tab-pane form-pane">
               <form onSubmit={handleCustomUrlSubmit}>
                 <p className="pane-subtitle">
-                  Paste any direct video file link (MP4, WebM, HLS m3u8, OGG) to watch in synchronized sync.
+                  Paste any direct video stream link (MP4, WebM, HLS m3u8, OGG) to watch in synchronized sync across devices.
                 </p>
                 <div className="form-group">
                   <label htmlFor="video-url">Video Stream URL</label>
@@ -225,10 +270,10 @@ export const MediaSelectModal: React.FC<MediaSelectModalProps> = ({
             <div className="tab-pane form-pane">
               <form onSubmit={handleYouTubeSubmit}>
                 <p className="pane-subtitle">
-                  Paste a YouTube video or music video link to watch synchronously.
+                  Paste a YouTube video link to watch synchronously together.
                 </p>
                 <div className="form-group">
-                  <label htmlFor="youtube-url">YouTube Link / ID</label>
+                  <label htmlFor="youtube-url">YouTube Link / Video ID</label>
                   <input
                     id="youtube-url"
                     type="text"

@@ -1,4 +1,6 @@
-export type StreamType = 'screen' | 'video' | 'youtube' | 'local' | 'dual_sync' | 'idle';
+export type StreamType = 'screen' | 'video' | 'youtube' | 'local' | 'dual_sync' | 'camera_stream' | 'idle';
+
+export type DeviceType = 'desktop' | 'mobile' | 'tablet';
 
 export interface User {
   id: string;
@@ -7,7 +9,10 @@ export interface User {
   isHost: boolean;
   isAudioOn?: boolean;
   isVideoOn?: boolean;
-  isSpeaking?: boolean;
+  isScreenSharing?: boolean;
+  deviceType?: DeviceType;
+  networkType?: 'direct' | 'relay' | 'unknown';
+  ping?: number;
 }
 
 export interface ChatMessage {
@@ -39,6 +44,9 @@ export interface SyncMediaState {
   duration: number;
   playbackRate: number;
   lastUpdatedBy: string;
+  streamerId?: string;
+  streamerName?: string;
+  hasAudio?: boolean;
   timestamp: number;
 }
 
@@ -52,6 +60,28 @@ export interface SampleMedia {
   duration: string;
 }
 
+export interface ConnectionStats {
+  iceState: string;
+  connectionState: string;
+  candidateType: string;
+  protocol: string;
+  rtt: number;
+  fps: number;
+  resolution: string;
+  bytesReceived: number;
+  bytesSent: number;
+  isRelayed: boolean;
+  networkQuality: 'excellent' | 'good' | 'fair' | 'poor' | 'reconnecting';
+}
+
+export interface TurnServerConfig {
+  urls: string;
+  username?: string;
+  credential?: string;
+}
+
+export type VideoViewMode = 'contain' | 'cover' | 'zoom';
+
 export type PeerSignalData = 
   | { type: 'chat'; message: ChatMessage }
   | { type: 'reaction'; emoji: string; senderName: string }
@@ -62,4 +92,7 @@ export type PeerSignalData =
   | { type: 'user_joined'; user: User }
   | { type: 'user_update'; user: Partial<User> & { id: string } }
   | { type: 'dual_countdown'; count: number; active: boolean; initiator: string }
-  | { type: 'stream_status'; streamType: StreamType; isLive: boolean; title: string };
+  | { type: 'stream_status'; streamType: StreamType; isLive: boolean; streamerId: string; streamerName: string; title: string; hasAudio?: boolean }
+  | { type: 'request_stream'; requestedBy: string }
+  | { type: 'ping'; timestamp: number }
+  | { type: 'pong'; originTimestamp: number };

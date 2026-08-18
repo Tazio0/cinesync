@@ -7,6 +7,7 @@ import { Lobby } from './components/Lobby';
 import { RoomModal } from './components/RoomModal';
 import { NetflixGuideModal } from './components/NetflixGuideModal';
 import { MediaSelectModal } from './components/MediaSelectModal';
+import { ConnectionStatsModal } from './components/ConnectionStatsModal';
 import type { SampleMedia } from './types';
 
 export function App() {
@@ -40,6 +41,7 @@ export function App() {
   const [isInviteOpen, setIsInviteOpen] = useState<boolean>(false);
   const [isNetflixGuideOpen, setIsNetflixGuideOpen] = useState<boolean>(false);
   const [isMediaModalOpen, setIsMediaModalOpen] = useState<boolean>(false);
+  const [isStatsModalOpen, setIsStatsModalOpen] = useState<boolean>(false);
 
   // P2P Room Hook
   const {
@@ -52,11 +54,13 @@ export function App() {
     typingUsers,
     syncState,
     countdown,
+    connectionStats,
     localScreenStream,
     remoteScreenStream,
     localCamStream,
     remoteCamStream,
     initRoom,
+    reconnect,
     sendMessage,
     sendReaction,
     sendTyping,
@@ -64,6 +68,7 @@ export function App() {
     startDualCountdown,
     startScreenShare,
     stopScreenShare,
+    startCameraMainStream,
     toggleCamera,
   } = usePeerRoom({
     userName,
@@ -99,6 +104,10 @@ export function App() {
   // Media selection handlers
   const handleSelectScreenShare = async () => {
     await startScreenShare();
+  };
+
+  const handleSelectCameraStream = async () => {
+    await startCameraMainStream('environment');
   };
 
   const handleSelectVideoUrl = (url: string, title: string) => {
@@ -181,7 +190,7 @@ export function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // If not yet in room, show the stylish Lobby
+  // If not yet in room, show the Lobby
   if (!isInRoom) {
     return (
       <Lobby
@@ -200,11 +209,13 @@ export function App() {
         peerCount={peers.length}
         streamType={syncState.type}
         streamTitle={syncState.title}
+        connectionStats={connectionStats}
         isTheaterMode={isTheaterMode}
         onToggleTheater={() => setIsTheaterMode((prev) => !prev)}
         onOpenInvite={() => setIsInviteOpen(true)}
         onOpenMediaModal={() => setIsMediaModalOpen(true)}
         onOpenNetflixGuide={() => setIsNetflixGuideOpen(true)}
+        onOpenStatsModal={() => setIsStatsModalOpen(true)}
         ambientGlow={ambientGlow}
         onToggleGlow={() => setAmbientGlow((prev) => !prev)}
         peers={peers}
@@ -218,6 +229,7 @@ export function App() {
           <VideoStage
             streamType={syncState.type}
             syncState={syncState}
+            connectionStats={connectionStats}
             localScreenStream={localScreenStream}
             remoteScreenStream={remoteScreenStream}
             localCamStream={localCamStream}
@@ -230,8 +242,10 @@ export function App() {
             peers={peers}
             onStartScreenShare={handleSelectScreenShare}
             onStopScreenShare={stopScreenShare}
+            onStartCameraMainStream={handleSelectCameraStream}
             onOpenMediaModal={() => setIsMediaModalOpen(true)}
             onOpenNetflixGuide={() => setIsNetflixGuideOpen(true)}
+            onOpenStatsModal={() => setIsStatsModalOpen(true)}
             onStartDualCountdown={startDualCountdown}
             onSyncAction={sendSyncAction}
           />
@@ -271,11 +285,19 @@ export function App() {
         isOpen={isMediaModalOpen}
         onClose={() => setIsMediaModalOpen(false)}
         onSelectScreenShare={handleSelectScreenShare}
+        onSelectCameraStream={handleSelectCameraStream}
         onSelectVideoUrl={handleSelectVideoUrl}
         onSelectYouTube={handleSelectYouTube}
         onSelectLocalFile={handleSelectLocalFile}
         onSelectDualSync={handleSelectDualSync}
         onSelectSampleMovie={handleSelectSampleMovie}
+      />
+
+      <ConnectionStatsModal
+        isOpen={isStatsModalOpen}
+        onClose={() => setIsStatsModalOpen(false)}
+        stats={connectionStats}
+        onReconnect={reconnect}
       />
     </div>
   );

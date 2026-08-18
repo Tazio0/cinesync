@@ -11,9 +11,10 @@ import {
   Film, 
   Copy, 
   Check, 
-  Users 
+  Users,
+  Activity
 } from 'lucide-react';
-import type { StreamType, User } from '../types';
+import type { StreamType, User, ConnectionStats } from '../types';
 import { soundFX } from '../utils/soundEffects';
 
 interface HeaderProps {
@@ -22,11 +23,13 @@ interface HeaderProps {
   peerCount: number;
   streamType: StreamType;
   streamTitle?: string;
+  connectionStats: ConnectionStats;
   isTheaterMode: boolean;
   onToggleTheater: () => void;
   onOpenInvite: () => void;
   onOpenMediaModal: () => void;
   onOpenNetflixGuide: () => void;
+  onOpenStatsModal: () => void;
   ambientGlow: boolean;
   onToggleGlow: () => void;
   peers: User[];
@@ -38,11 +41,13 @@ export const Header: React.FC<HeaderProps> = ({
   peerCount,
   streamType,
   streamTitle,
+  connectionStats,
   isTheaterMode,
   onToggleTheater,
   onOpenInvite,
   onOpenMediaModal,
   onOpenNetflixGuide,
+  onOpenStatsModal,
   ambientGlow,
   onToggleGlow,
   peers,
@@ -67,7 +72,7 @@ export const Header: React.FC<HeaderProps> = ({
   const getStreamBadge = () => {
     switch (streamType) {
       case 'screen':
-        return { label: 'Netflix Screen Stream', icon: <Tv size={14} />, color: '#E50914' };
+        return { label: 'Screen Stream Active', icon: <Tv size={14} />, color: '#E50914' };
       case 'video':
         return { label: streamTitle || 'Synchronized Movie', icon: <Film size={14} />, color: '#F59E0B' };
       case 'youtube':
@@ -75,12 +80,25 @@ export const Header: React.FC<HeaderProps> = ({
       case 'dual_sync':
         return { label: 'Dual Netflix Sync', icon: <Tv size={14} />, color: '#06B6D4' };
       default:
-        return { label: 'Cinema Ready', icon: <Film size={14} />, color: '#9CA3AF' };
+        return { label: 'Party Ready', icon: <Film size={14} />, color: '#9CA3AF' };
     }
   };
 
   const badge = getStreamBadge();
   const totalUsers = 1 + (peerCount > 0 ? peerCount : peers.length);
+
+  const getNetworkQualityDot = () => {
+    switch (connectionStats.networkQuality) {
+      case 'excellent':
+        return 'dot-green';
+      case 'good':
+        return 'dot-cyan';
+      case 'fair':
+        return 'dot-amber';
+      default:
+        return 'dot-red';
+    }
+  };
 
   return (
     <header className={`app-header ${isTheaterMode ? 'theater-header' : ''}`}>
@@ -105,6 +123,17 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         )}
 
+        {/* Network Traversal Indicator */}
+        <button 
+          className="network-status-pill" 
+          onClick={onOpenStatsModal}
+          title={`Network Quality: ${connectionStats.networkQuality.toUpperCase()} (${connectionStats.isRelayed ? 'TURN Relay' : 'Direct P2P'}). Click for diagnostics.`}
+        >
+          <span className={`network-dot ${getNetworkQualityDot()}`}></span>
+          <Activity size={12} />
+          <span className="network-ping">{connectionStats.rtt ? `${connectionStats.rtt}ms` : 'P2P'}</span>
+        </button>
+
         <div className="stream-badge" style={{ borderColor: `${badge.color}33`, color: badge.color }}>
           {badge.icon}
           <span>{badge.label}</span>
@@ -126,7 +155,7 @@ export const Header: React.FC<HeaderProps> = ({
               key={peer.id}
               className="user-avatar-small"
               style={{ backgroundColor: peer.avatarColor }}
-              title={`${peer.name} (Friend)`}
+              title={`${peer.name}`}
             >
               {peer.name.charAt(0).toUpperCase()}
             </div>

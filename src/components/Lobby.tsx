@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Tv, 
-  Film, 
   Sparkles, 
   ArrowRight, 
   Users, 
   Zap, 
-  MessageSquare
+  MessageSquare,
+  Smartphone,
+  Laptop
 } from 'lucide-react';
+import { getDeviceType } from '../utils/deviceInfo';
 
 interface LobbyProps {
   initialRoomId?: string;
@@ -29,6 +31,8 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
   const [selectedColor, setSelectedColor] = useState<string>(COLOR_CHOICES[0]);
   const [joinCode, setJoinCode] = useState<string>(initialRoomId || '');
   const [isJoiningWithCode, setIsJoiningWithCode] = useState<boolean>(!!initialRoomId);
+
+  const deviceType = getDeviceType();
 
   useEffect(() => {
     if (initialRoomId) {
@@ -78,11 +82,21 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
             <span className="lobby-brand-title">CineSync</span>
           </div>
           <h1 className="lobby-headline">
-            Watch Netflix & Movies <span className="headline-highlight">Together</span>
+            Screen Sharing & Movies <span className="headline-highlight">Across Any Device</span>
           </h1>
           <p className="lobby-subtitle">
-            Synchronized playback, HD screen sharing with stereo audio, and real-time chat. Zero installs needed for your friends.
+            Synchronized 60 FPS tab & screen sharing with stereo audio, peer-to-peer across networks with zero installs needed.
           </p>
+
+          {/* Device Capability Badge */}
+          <div className="device-status-badge">
+            {deviceType === 'desktop' ? <Laptop size={14} /> : <Smartphone size={14} />}
+            <span>
+              {deviceType === 'desktop'
+                ? 'Desktop detected — HD 60 FPS Tab Audio Sharing Ready'
+                : 'Mobile / Tablet detected — HD Watch & Stream Ready'}
+            </span>
+          </div>
         </div>
 
         {/* Main Card */}
@@ -210,35 +224,15 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
           </div>
         </div>
 
-        {/* Feature Highlights Minimalist Grid */}
+        {/* Feature Highlights Grid */}
         <div className="lobby-features-grid">
           <div className="feature-item">
             <div className="feature-icon">
               <Tv size={20} />
             </div>
             <div className="feature-text">
-              <h4>Netflix & Tab Streaming</h4>
-              <p>Stream any browser tab in 1080p 60fps with clear audio</p>
-            </div>
-          </div>
-
-          <div className="feature-item">
-            <div className="feature-icon">
-              <MessageSquare size={20} />
-            </div>
-            <div className="feature-text">
-              <h4>Live Chat & Reactions</h4>
-              <p>Real-time chat with floating popcorn & emoji bursts</p>
-            </div>
-          </div>
-
-          <div className="feature-item">
-            <div className="feature-icon">
-              <Film size={20} />
-            </div>
-            <div className="feature-text">
-              <h4>Synchronized Playback</h4>
-              <p>Play YouTube, MP4 videos, and local files in sync</p>
+              <h4>Screen & Tab Sharing</h4>
+              <p>Stream any browser tab or window in 1080p 60fps with clear audio</p>
             </div>
           </div>
 
@@ -247,8 +241,28 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
               <Zap size={20} />
             </div>
             <div className="feature-text">
-              <h4>Zero Installs Needed</h4>
-              <p>Pure peer-to-peer WebRTC right in your web browser</p>
+              <h4>Cross-Network WebRTC</h4>
+              <p>Seamless NAT & firewall traversal with automatic STUN/TURN relays</p>
+            </div>
+          </div>
+
+          <div className="feature-item">
+            <div className="feature-icon">
+              <Smartphone size={20} />
+            </div>
+            <div className="feature-text">
+              <h4>Any Device, Zero Installs</h4>
+              <p>Works on iPhone, Android, iPad, Mac, Windows, Linux, and Smart TVs</p>
+            </div>
+          </div>
+
+          <div className="feature-item">
+            <div className="feature-icon">
+              <MessageSquare size={20} />
+            </div>
+            <div className="feature-text">
+              <h4>Live Chat & Popcorn Pops</h4>
+              <p>Real-time chat with floating popcorn bursts and live video PiP</p>
             </div>
           </div>
         </div>

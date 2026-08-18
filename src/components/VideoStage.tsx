@@ -13,14 +13,26 @@ import {
   RotateCw,
   Timer,
   HelpCircle,
-  Maximize2
+  Maximize2,
+  Camera,
+  Activity,
+  Layers
 } from 'lucide-react';
-import type { StreamType, SyncMediaState, User, ReactionItem } from '../types';
+import type { 
+  StreamType, 
+  SyncMediaState, 
+  User, 
+  ReactionItem, 
+  ConnectionStats, 
+  VideoViewMode 
+} from '../types';
 import { FloatingReactions } from './FloatingReactions';
+import { isScreenShareSupported } from '../utils/deviceInfo';
 
 interface VideoStageProps {
   streamType: StreamType;
   syncState: SyncMediaState;
+  connectionStats: ConnectionStats;
   localScreenStream: MediaStream | null;
   remoteScreenStream: MediaStream | null;
   localCamStream: MediaStream | null;
@@ -33,8 +45,10 @@ interface VideoStageProps {
   peers: User[];
   onStartScreenShare: () => void;
   onStopScreenShare: () => void;
+  onStartCameraMainStream: () => void;
   onOpenMediaModal: () => void;
   onOpenNetflixGuide: () => void;
+  onOpenStatsModal: () => void;
   onStartDualCountdown: () => void;
   onSyncAction: (action: 'play' | 'pause' | 'seek' | 'change_source', state: Partial<SyncMediaState>) => void;
 }
@@ -42,6 +56,7 @@ interface VideoStageProps {
 export const VideoStage: React.FC<VideoStageProps> = ({
   streamType,
   syncState,
+  connectionStats,
   localScreenStream,
   remoteScreenStream,
   localCamStream,
@@ -52,8 +67,10 @@ export const VideoStage: React.FC<VideoStageProps> = ({
   peers,
   onStartScreenShare,
   onStopScreenShare,
+  onStartCameraMainStream,
   onOpenMediaModal,
   onOpenNetflixGuide,
+  onOpenStatsModal,
   onStartDualCountdown,
   onSyncAction,
 }) => {
@@ -70,11 +87,16 @@ export const VideoStage: React.FC<VideoStageProps> = ({
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [showControls, setShowControls] = useState<boolean>(true);
+  const [viewMode, setViewMode] = useState<VideoViewMode>('contain');
+  const [needsAutoplayTap, setNeedsAutoplayTap] = useState<boolean>(false);
+  
   const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const activeScreenStream = remoteScreenStream || localScreenStream;
+  const isStreamingLocal = !!localScreenStream;
+  const screenShareSupported = isScreenShareSupported();
 
-  // Listen to browser fullscreen changes (e.g. when user hits ESC)
+  // Handle Fullscreen state change
   useEffect(() => {
     const handleFullscreenChange = () => {
       setIsFullscreen(!!document.fullscreenElement);
@@ -88,38 +110,50 @@ export const VideoStage: React.FC<VideoStageProps> = ({
     };
   }, []);
 
-  // Bind screen stream to video element
+  // Bind screen stream to video element & handle mobile autoplay policies
   useEffect(() => {
-    if (screenVideoRef.current) {
+    const vid = screenVideoRef.current;
+    if (vid) {
       if (activeScreenStream) {
-        screenVideoRef.current.srcObject = activeScreenStream;
+        vid.srcObject = activeScreenStream;
+        // On iOS Safari / Chrome, unmuted autoplay can reject with NotAllowedError
+        const playPromise = vid.play();
+        if (playPromise !== undefined) {
+          playPromise
+            .then(() => {
+              setNeedsAutoplayTap(false);
+            })
+            .catch((err) => {
+              console.warn('Autoplay prevented by browser policy:', err);
+              setNeedsAutoplayTap(true);
+            });
+        }
       } else {
-        screenVideoRef.current.srcObject = null;
+        vid.srcObject = null;
+        setNeedsAutoplayTap(false);
       }
     }
   }, [activeScreenStream]);
 
-  // Bind local cam stream
+  // Bind webcam streams
   useEffect(() => {
     if (localCamRef.current && localCamStream) {
       localCamRef.current.srcObject = localCamStream;
     }
   }, [localCamStream]);
 
-  // Bind remote cam stream
   useEffect(() => {
     if (remoteCamRef.current && remoteCamStream) {
       remoteCamRef.current.srcObject = remoteCamStream;
     }
   }, [remoteCamStream]);
 
-  // Handle synchronized video state changes from peers
+  // Handle synchronized video state changes
   useEffect(() => {
     if (streamType === 'video' || streamType === 'local') {
       const vid = videoRef.current;
       if (!vid) return;
 
-      // Sync play / pause
       if (syncState.isPlaying && vid.paused) {
         vid.play().catch(() => {});
         setIsPlaying(true);
@@ -128,7 +162,6 @@ export const VideoStage: React.FC<VideoStageProps> = ({
         setIsPlaying(false);
       }
 
-      // Drift compensation (if out of sync by > 1.2s)
       if (syncState.currentTime !== undefined && Math.abs(vid.currentTime - syncState.currentTime) > 1.2) {
         vid.currentTime = syncState.currentTime;
         setCurrentTime(syncState.currentTime);
@@ -144,7 +177,15 @@ export const VideoStage: React.FC<VideoStageProps> = ({
       if (isPlaying || streamType === 'screen') {
         setShowControls(false);
       }
-    }, 3000);
+    }, 3500);
+  };
+
+  const handleManualPlayTap = () => {
+    if (screenVideoRef.current) {
+      screenVideoRef.current.play().then(() => {
+        setNeedsAutoplayTap(false);
+      }).catch(() => {});
+    }
   };
 
   const togglePlay = () => {
@@ -211,12 +252,40 @@ export const VideoStage: React.FC<VideoStageProps> = ({
   };
 
   const toggleFullscreen = () => {
+    const targetVideo = screenVideoRef.current || videoRef.current;
     if (!containerRef.current) return;
+
     if (!document.fullscreenElement) {
-      containerRef.current.requestFullscreen().catch(() => {});
+      if (containerRef.current.requestFullscreen) {
+        containerRef.current.requestFullscreen().catch(() => {});
+      } else if (targetVideo && (targetVideo as unknown as { webkitEnterFullscreen?: () => void }).webkitEnterFullscreen) {
+        // Fallback for iOS Safari
+        (targetVideo as unknown as { webkitEnterFullscreen: () => void }).webkitEnterFullscreen();
+      }
     } else {
-      document.exitFullscreen().catch(() => {});
+      if (document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      }
     }
+  };
+
+  const togglePictureInPicture = async () => {
+    const targetVideo = screenVideoRef.current || videoRef.current;
+    if (!targetVideo) return;
+
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+      } else if (document.pictureInPictureEnabled) {
+        await targetVideo.requestPictureInPicture();
+      }
+    } catch (err) {
+      console.warn('PiP error:', err);
+    }
+  };
+
+  const cycleViewMode = () => {
+    setViewMode((prev) => (prev === 'contain' ? 'cover' : prev === 'cover' ? 'zoom' : 'contain'));
   };
 
   const formatTime = (seconds: number) => {
@@ -275,29 +344,82 @@ export const VideoStage: React.FC<VideoStageProps> = ({
 
       {/* Media Content Display */}
       <div className="video-player-wrapper">
-        {/* 1. SCREEN SHARE (NETFLIX TAB) */}
+        {/* 1. SCREEN SHARE (NETFLIX TAB / DESKTOP / MOBILE STREAM) */}
         {streamType === 'screen' && (
           <div className="screen-stream-view">
             <video
               ref={screenVideoRef}
               autoPlay
               playsInline
-              className="main-stream-video"
+              className={`main-stream-video mode-${viewMode}`}
             />
+
+            {/* Mobile Autoplay Tap-to-Play Overlay */}
+            {needsAutoplayTap && (
+              <div className="autoplay-tap-overlay" onClick={handleManualPlayTap}>
+                <button className="btn-autoplay-tap">
+                  <Play size={20} fill="currentColor" />
+                  <span>Tap to Watch Stream & Enable Sound</span>
+                </button>
+              </div>
+            )}
+
+            {/* Top Stream Status Overlay */}
             <div className={`stream-overlay-info ${showControls ? 'visible' : 'hidden'}`}>
               <div className="stream-live-tag">
                 <span className="live-pulse"></span>
-                <span>{localScreenStream ? 'Streaming Your Netflix Tab' : "Friend's Netflix Stream"}</span>
+                <span>
+                  {isStreamingLocal 
+                    ? 'You are Sharing Live Screen' 
+                    : (syncState.streamerName ? `${syncState.streamerName}'s Live Stream` : "Friend's Screen Stream")}
+                </span>
+                {syncState.hasAudio && (
+                  <span className="audio-live-pill" title="Stereo Audio Stream Active">
+                    <Volume2 size={12} />
+                    <span>HD Audio</span>
+                  </span>
+                )}
               </div>
-              {localScreenStream && (
-                <button className="stop-stream-pill-btn" onClick={onStopScreenShare}>
-                  Stop Sharing
+
+              <div className="top-right-controls">
+                {/* Diagnostics Quality Badge */}
+                <button className="stream-stats-pill-btn" onClick={onOpenStatsModal} title="View Network & WebRTC Diagnostics">
+                  <Activity size={13} />
+                  <span>{connectionStats.rtt ? `${connectionStats.rtt}ms` : 'P2P'}</span>
                 </button>
-              )}
+
+                {isStreamingLocal && (
+                  <button className="stop-stream-pill-btn" onClick={onStopScreenShare}>
+                    Stop Sharing
+                  </button>
+                )}
+              </div>
             </div>
 
-            {/* Quick Fullscreen & Audio Floating Controls for Screen Stream */}
+            {/* Floating Controls for Screen Stream */}
             <div className={`screen-floating-controls ${showControls ? 'visible' : 'hidden'}`}>
+              {/* Fit / Fill / Zoom Toggle */}
+              <button 
+                className="screen-control-pill" 
+                onClick={cycleViewMode}
+                title={`View Mode: ${viewMode.toUpperCase()} (Click to toggle Fit / Fill / Zoom)`}
+              >
+                <Layers size={15} />
+                <span className="pill-text-sm">{viewMode === 'contain' ? 'Fit' : viewMode === 'cover' ? 'Fill' : 'Zoom'}</span>
+              </button>
+
+              {/* Picture in Picture */}
+              {typeof document !== 'undefined' && 'pictureInPictureEnabled' in document && (
+                <button 
+                  className="screen-control-pill" 
+                  onClick={togglePictureInPicture}
+                  title="Picture in Picture (PiP)"
+                >
+                  <Maximize size={15} />
+                </button>
+              )}
+
+              {/* Audio Mute/Unmute */}
               <button 
                 className="screen-control-pill" 
                 onClick={toggleMute}
@@ -305,13 +427,15 @@ export const VideoStage: React.FC<VideoStageProps> = ({
               >
                 {isMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
               </button>
+
+              {/* Fullscreen */}
               <button 
                 className="screen-control-pill fullscreen-pill" 
                 onClick={toggleFullscreen}
                 title="Fullscreen (Double-click or F)"
               >
                 {isFullscreen ? <Minimize size={16} /> : <Maximize2 size={16} />}
-                <span>{isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}</span>
+                <span>{isFullscreen ? 'Exit' : 'Fullscreen'}</span>
               </button>
             </div>
           </div>
@@ -323,7 +447,7 @@ export const VideoStage: React.FC<VideoStageProps> = ({
             <video
               ref={videoRef}
               src={syncState.url}
-              className="main-stream-video"
+              className={`main-stream-video mode-${viewMode}`}
               onTimeUpdate={handleTimeUpdate}
               onLoadedMetadata={handleLoadedMetadata}
               onClick={togglePlay}
@@ -394,6 +518,13 @@ export const VideoStage: React.FC<VideoStageProps> = ({
                   <span className="video-sync-title">{syncState.title}</span>
                   <button 
                     className="control-btn" 
+                    onClick={cycleViewMode} 
+                    title={`View Mode: ${viewMode}`}
+                  >
+                    <Layers size={17} />
+                  </button>
+                  <button 
+                    className="control-btn" 
                     onClick={toggleFullscreen} 
                     title="Fullscreen (Double click or F)"
                   >
@@ -415,7 +546,6 @@ export const VideoStage: React.FC<VideoStageProps> = ({
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
               allowFullScreen
             />
-            {/* Floating Fullscreen button for YouTube */}
             <div className={`screen-floating-controls ${showControls ? 'visible' : 'hidden'}`}>
               <button 
                 className="screen-control-pill fullscreen-pill" 
@@ -423,7 +553,7 @@ export const VideoStage: React.FC<VideoStageProps> = ({
                 title="Fullscreen (F)"
               >
                 {isFullscreen ? <Minimize size={16} /> : <Maximize2 size={16} />}
-                <span>{isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}</span>
+                <span>{isFullscreen ? 'Exit' : 'Fullscreen'}</span>
               </button>
             </div>
           </div>
@@ -468,22 +598,35 @@ export const VideoStage: React.FC<VideoStageProps> = ({
           <div className="idle-welcome-stage">
             <div className="idle-hero-content">
               <div className="idle-popcorn-emblem">🍿</div>
-              <h1 className="idle-hero-title">Ready for Movie Night</h1>
+              <h1 className="idle-hero-title">Ready for Screen Share & Movies</h1>
               <p className="idle-hero-subtitle">
-                Stream your Netflix tab with high-definition audio, watch synchronized movies, and chat in real-time.
+                Stream your Netflix tab across any network with crystal-clear audio, watch synchronized videos, or broadcast live video seamlessly.
               </p>
 
               <div className="idle-cta-grid">
-                <div className="cta-action-card netflix-card" onClick={onStartScreenShare}>
-                  <div className="cta-card-icon">
-                    <Tv size={26} />
+                {screenShareSupported ? (
+                  <div className="cta-action-card netflix-card" onClick={onStartScreenShare}>
+                    <div className="cta-card-icon">
+                      <Tv size={26} />
+                    </div>
+                    <div className="cta-card-text">
+                      <h3>Share Screen / Netflix Tab</h3>
+                      <p>Stream 1080p 60 FPS tab or window with stereo audio</p>
+                    </div>
+                    <button className="cta-btn-red">Start Sharing</button>
                   </div>
-                  <div className="cta-card-text">
-                    <h3>Share Netflix Tab</h3>
-                    <p>Broadcast Netflix tab with crystal-clear audio</p>
+                ) : (
+                  <div className="cta-action-card netflix-card" onClick={onStartCameraMainStream}>
+                    <div className="cta-card-icon">
+                      <Camera size={26} />
+                    </div>
+                    <div className="cta-card-text">
+                      <h3>Broadcast Live Camera</h3>
+                      <p>Stream your mobile camera live to the party</p>
+                    </div>
+                    <button className="cta-btn-red">Go Live</button>
                   </div>
-                  <button className="cta-btn-red">Start Stream</button>
-                </div>
+                )}
 
                 <div className="cta-action-card media-card" onClick={onOpenMediaModal}>
                   <div className="cta-card-icon">
@@ -500,7 +643,11 @@ export const VideoStage: React.FC<VideoStageProps> = ({
               <div className="idle-footer-helper">
                 <button className="text-helper-btn" onClick={onOpenNetflixGuide}>
                   <HelpCircle size={14} />
-                  <span>How does Netflix audio & tab sharing work?</span>
+                  <span>How does Netflix tab audio & cross-network sharing work?</span>
+                </button>
+                <button className="text-helper-btn" onClick={onOpenStatsModal}>
+                  <Activity size={14} />
+                  <span>Network: {connectionStats.networkQuality.toUpperCase()} ({connectionStats.rtt ? `${connectionStats.rtt}ms` : '<20ms'})</span>
                 </button>
               </div>
             </div>
