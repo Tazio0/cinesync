@@ -47,7 +47,7 @@ export const TurnModal: React.FC<TurnModalProps> = ({ isOpen, onClose }) => {
       <div className="modal-card small">
         <h3>Configure TURN / STUN</h3>
         <p>Paste a JSON object describing your TURN/STUN server. Example:</p>
-        <pre className="example">{"urls":"turn:turn.example:3478","username":"user","credential":"pass"}</pre>
+        <pre className="example">{'{"urls":"turn:turn.example:3478","username":"user","credential":"pass"}'}</pre>
         <textarea
           className="modal-textarea"
           value={text}

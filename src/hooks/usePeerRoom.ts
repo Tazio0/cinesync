@@ -145,6 +145,7 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
   const heartbeatIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const statsIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const connectRetryRef = useRef<Map<string, number>>(new Map());
+  const relayModeRef = useRef<boolean>(false);
   
   const currentSlotRef = useRef<number>(1);
   const cleanRoomIdRef = useRef<string>('');
@@ -162,9 +163,24 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
     syncStateRef.current = syncState;
   }, [isHost, currentUser, localScreenStream, localCamStream, syncState]);
 
-  // Load custom TURN servers from localStorage if configured
+  // Load custom TURN servers from localStorage or Vite env if configured
   const getActiveIceServers = useCallback((): RTCIceServer[] => {
     try {
+      // 1) Vercel / Vite environment variable (VITE_ICE_SERVERS) can provide JSON array or single object
+      const envVar = (import.meta as any).env?.VITE_ICE_SERVERS;
+      if (envVar) {
+        try {
+          const parsed = JSON.parse(envVar);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed as RTCIceServer[];
+          if (typeof parsed === 'object' && parsed !== null && parsed.urls) return [parsed as RTCIceServer, ...DEFAULT_ICE_SERVERS];
+        } catch (e) {
+          // If not JSON, allow comma-separated URLs string
+          const urls = String(envVar).split(',').map((u) => u.trim()).filter(Boolean);
+          if (urls.length) return [{ urls }, ...DEFAULT_ICE_SERVERS] as RTCIceServer[];
+        }
+      }
+
+      // 2) localStorage override (user-pasted TURN JSON in UI)
       const customTurnStr = localStorage.getItem('cinesync_custom_turn');
       if (customTurnStr) {
         const customTurn: TurnServerConfig = JSON.parse(customTurnStr);
@@ -177,8 +193,8 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
           return [customEntry, ...DEFAULT_ICE_SERVERS];
         }
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      console.warn('Error parsing ICE servers from env/localStorage:', err);
     }
     return DEFAULT_ICE_SERVERS;
   }, []);
@@ -737,7 +753,16 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
     const scheduleRetryForSlot = () => {
       const prev = connectRetryRef.current.get(slotId) || 0;
       if (prev >= 3) {
+        // After several retries, switch to RELAY-only mode and recreate the peer
+        console.warn(`[P2P Mesh] Slot ${slotId} failed ${prev} times, enabling relay-only mode`);
         connectRetryRef.current.delete(slotId);
+        relayModeRef.current = true;
+        try {
+          // Recreate peer on current slot in relay mode to force TURN relays
+          createPeerOnSlot(cleanRoomIdRef.current || roomId, currentSlotRef.current || 1, isHostRef.current);
+        } catch (e) {
+          console.warn('Failed to recreate peer in relay mode:', e);
+        }
         return;
       }
       connectRetryRef.current.set(slotId, prev + 1);
@@ -1181,21 +1206,53 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
       deviceType: getDeviceType(),
     }));
 
-    const iceServers = getActiveIceServers();
+    let activeIce = getActiveIceServers();
 
-    const peerOptions = {
+    // If relay mode is enabled (we've detected repeated failures), prefer TURN-only servers
+    if (relayModeRef.current) {
+      const turnOnly = activeIce.filter((s) => {
+        const urls = Array.isArray(s.urls) ? s.urls.join(',') : String(s.urls || '');
+        return urls.includes('turn:') || urls.includes('turns:');
+      });
+      if (turnOnly.length > 0) activeIce = turnOnly;
+    }
+
+    const peerOptions: any = {
       debug: 1,
       config: {
-        iceServers,
+        iceServers: activeIce,
         iceCandidatePoolSize: 10,
         sdpSemantics: 'unified-plan',
       },
-      // Prefer the public PeerJS signaling cloud as a fallback for strict networks
-      host: '0.peerjs.com',
-      port: 443,
-      path: '/',
-      secure: true,
-    } as any;
+    };
+
+    // Allow configuring PeerJS signaling host via Vite env (VITE_PEERJS_HOST, VITE_PEERJS_PORT, VITE_PEERJS_SECURE, VITE_PEERJS_PATH)
+    const envHost = (import.meta as any).env?.VITE_PEERJS_HOST;
+    if (envHost) {
+      peerOptions.host = envHost;
+      const envPort = (import.meta as any).env?.VITE_PEERJS_PORT;
+      if (envPort) peerOptions.port = Number(envPort);
+      const envPath = (import.meta as any).env?.VITE_PEERJS_PATH;
+      if (envPath) peerOptions.path = envPath;
+      const envSecure = (import.meta as any).env?.VITE_PEERJS_SECURE;
+      if (typeof envSecure !== 'undefined') peerOptions.secure = String(envSecure) === 'true';
+    } else {
+      // Default fallback to public PeerJS signaling cloud
+      peerOptions.host = '0.peerjs.com';
+      peerOptions.port = 443;
+      peerOptions.path = '/';
+      peerOptions.secure = true;
+    }
+
+    if (relayModeRef.current) {
+      // force ICE to use relay candidates only
+      peerOptions.config.iceTransportPolicy = 'relay';
+    }
+
+    if (relayModeRef.current) {
+      // force ICE to use relay candidates only
+      peerOptions.config.iceTransportPolicy = 'relay';
+    }
 
     let peer: Peer;
     try {

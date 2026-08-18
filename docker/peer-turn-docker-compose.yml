@@ -21,9 +21,10 @@ services:
       - REALM=example.com
       - LISTEN=0.0.0.0
       - EXTERNAL_IP=
-    # For production, provide a secure username/password via TURN_USERS env or a mounted turnserver.conf
-    # Example to use static users (not recommended for prod):
-    # - TURN_USERS=user1:pass1
+    # For testing, mount the generated turnserver.conf and turnuserdb.conf
+    volumes:
+      - ../docker/coturn/turnserver.conf:/etc/turnserver.conf:ro
+      - ../docker/coturn/turnuserdb.conf:/etc/turnuserdb.conf:ro
     command: ["-n", "--log-file=stdout", "--no-cli", "--lt-cred-mech"]
 
 # Notes:
