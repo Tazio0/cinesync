@@ -25,7 +25,10 @@ services:
     volumes:
       - ../docker/coturn/turnserver.conf:/etc/turnserver.conf:ro
       - ../docker/coturn/turnuserdb.conf:/etc/turnuserdb.conf:ro
-    command: ["-n", "--log-file=stdout", "--no-cli", "--lt-cred-mech"]
+      - ../docker/coturn/certs:/etc/coturn/certs:ro
+    environment:
+      - EXTERNAL_IP=${EXTERNAL_IP}
+    command: ["-n", "--log-file=stdout", "--no-cli", "--lt-cred-mech", "--external-ip", "${EXTERNAL_IP}"]
 
 # Notes:
 # - This compose file provides a minimal local PeerServer + Coturn stack for testing.

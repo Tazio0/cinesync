@@ -15,6 +15,9 @@ tls-listening-port=5349
 listening-ip=0.0.0.0
 relay-ip=0.0.0.0
 external-ip=
+# TLS cert paths (optional when you have certs mounted at docker/coturn/certs)
+# cert=/etc/coturn/certs/fullchain.pem
+# pkey=/etc/coturn/certs/privkey.pem
 fingerprint
 lt-cred-mech
 use-auth-secret
