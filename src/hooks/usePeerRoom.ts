@@ -59,8 +59,6 @@ const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
   },
 ];
 
-const CONNECT_TIMEOUT_MS = 25000;
-
 export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UsePeerRoomProps) {
   const [roomId, setRoomId] = useState<string>(initialRoomId || '');
   const [isHost, setIsHost] = useState<boolean>(isHostMode);
@@ -137,10 +135,12 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
   // Internal references
   const peerRef = useRef<Peer | null>(null);
   const connectionsRef = useRef<Map<string, DataConnection>>(new Map());
+  const knownPeersRef = useRef<Set<string>>(new Set());
   const screenCallsRef = useRef<Map<string, MediaConnection>>(new Map());
   const camCallsRef = useRef<Map<string, MediaConnection>>(new Map());
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const connectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const heartbeatIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const statsIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   
@@ -189,9 +189,7 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
           if (!params.encodings || params.encodings.length === 0) {
             params.encodings = [{}];
           }
-          // Set high-bitrate threshold for 1080p 60fps streaming across networks
           params.encodings[0].maxBitrate = 4_500_000; // 4.5 Mbps
-          // Preserve framerate for fluid motion
           params.degradationPreference = 'maintain-framerate';
           sender.setParameters(params).catch(() => {});
         }
@@ -341,7 +339,11 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
   const handleDataReceived = useCallback((data: PeerSignalData, conn: DataConnection) => {
     switch (data.type) {
       case 'ping':
-        conn.send({ type: 'pong', originTimestamp: data.timestamp });
+        try {
+          conn.send({ type: 'pong', originTimestamp: data.timestamp });
+        } catch {
+          // ignore
+        }
         break;
 
       case 'pong': {
@@ -383,43 +385,64 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
         });
         break;
 
-      case 'user_joined':
+      case 'user_joined': {
+        const incomingUser = data.user;
+        const isNewPeer = !knownPeersRef.current.has(incomingUser.id);
+        knownPeersRef.current.add(incomingUser.id);
+
         setPeers((prev) => {
-          if (prev.some((p) => p.id === data.user.id)) return prev;
+          const index = prev.findIndex((p) => p.id === incomingUser.id);
+          if (index >= 0) {
+            const copy = [...prev];
+            copy[index] = { ...copy[index], ...incomingUser };
+            return copy;
+          }
+          return [...prev, incomingUser];
+        });
+
+        setIsConnected(true);
+        setConnectionStatus('connected');
+        setStatusMessage('Connected with friend');
+
+        if (isNewPeer) {
           soundFX.playJoinSound();
-          return [...prev, data.user];
-        });
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `${Date.now()}-join-${incomingUser.id}`,
+              senderId: 'system',
+              senderName: 'System',
+              avatarColor: '#10B981',
+              text: `${incomingUser.name} joined the watch party! 🍿`,
+              timestamp: Date.now(),
+              type: 'system',
+            },
+          ]);
+        }
 
-        // Add system message
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `${Date.now()}-join-${data.user.id}`,
-            senderId: 'system',
-            senderName: 'System',
-            avatarColor: '#10B981',
-            text: `${data.user.name} joined the watch party! 🍿`,
-            timestamp: Date.now(),
-            type: 'system',
-          },
-        ]);
+        // Only reply if this wasn't an acknowledge response to avoid ping-pong loops
+        if (!data.isResponse) {
+          try {
+            conn.send({
+              type: 'user_joined',
+              user: currentUserRef.current,
+              isResponse: true,
+            });
 
-        // Reply with our user profile and sync state
-        conn.send({
-          type: 'user_joined',
-          user: currentUserRef.current,
-        });
+            conn.send({
+              type: 'sync_response',
+              fullState: syncStateRef.current,
+            });
+          } catch (err) {
+            console.warn('Error replying with user_joined handshake:', err);
+          }
 
-        conn.send({
-          type: 'sync_response',
-          fullState: syncStateRef.current,
-        });
-
-        // If we are actively sharing our screen or camera, call this newly joined peer immediately!
-        setTimeout(() => {
-          callPeerWithActiveStreams(conn.peer);
-        }, 300);
+          setTimeout(() => {
+            callPeerWithActiveStreams(conn.peer);
+          }, 350);
+        }
         break;
+      }
 
       case 'user_update':
         setPeers((prev) =>
@@ -442,14 +465,18 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
         break;
 
       case 'sync_request':
-        conn.send({
-          type: 'sync_response',
-          fullState: syncStateRef.current,
-        });
+        try {
+          conn.send({
+            type: 'sync_response',
+            fullState: syncStateRef.current,
+          });
+        } catch {
+          // ignore
+        }
         if (localScreenStreamRef.current || localCamStreamRef.current) {
           setTimeout(() => {
             callPeerWithActiveStreams(conn.peer);
-          }, 300);
+          }, 350);
         }
         break;
 
@@ -480,7 +507,11 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
         }));
         if (data.isLive && data.streamerId !== currentUserRef.current.id) {
           // Request stream from streamer if not already received
-          conn.send({ type: 'request_stream', requestedBy: currentUserRef.current.id });
+          try {
+            conn.send({ type: 'request_stream', requestedBy: currentUserRef.current.id });
+          } catch {
+            // ignore
+          }
         }
         break;
     }
@@ -560,7 +591,7 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
   const setupDataConnection = useCallback((conn: DataConnection) => {
     connectionsRef.current.set(conn.peer, conn);
 
-    conn.on('open', () => {
+    const handleOpen = () => {
       console.log(`[P2P] Data connection opened with: ${conn.peer}`);
       setIsConnected(true);
       setConnectionStatus('connected');
@@ -570,24 +601,40 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
         clearTimeout(connectTimeoutRef.current);
         connectTimeoutRef.current = null;
       }
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current);
+        retryTimeoutRef.current = null;
+      }
 
       // Send initial join payload
-      conn.send({
-        type: 'user_joined',
-        user: currentUserRef.current,
-      });
+      try {
+        conn.send({
+          type: 'user_joined',
+          user: currentUserRef.current,
+          isResponse: false,
+        });
 
-      // Request sync state
-      conn.send({
-        type: 'sync_request',
-        requestedBy: currentUserRef.current.id,
-      });
+        // Request sync state
+        conn.send({
+          type: 'sync_request',
+          requestedBy: currentUserRef.current.id,
+        });
+      } catch (err) {
+        console.warn('Error sending initial payload on open:', err);
+      }
 
       // If we are sharing screen, call this peer
       setTimeout(() => {
         callPeerWithActiveStreams(conn.peer);
-      }, 300);
-    });
+      }, 400);
+    };
+
+    // Crucial: check if connection is ALREADY open (common on receiver side)
+    if (conn.open) {
+      handleOpen();
+    } else {
+      conn.on('open', handleOpen);
+    }
 
     conn.on('data', (data) => {
       handleDataReceived(data as PeerSignalData, conn);
@@ -595,6 +642,7 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
 
     conn.on('close', () => {
       connectionsRef.current.delete(conn.peer);
+      knownPeersRef.current.delete(conn.peer);
       screenCallsRef.current.delete(conn.peer);
       camCallsRef.current.delete(conn.peer);
       setPeers((prev) => prev.filter((p) => p.id !== conn.peer));
@@ -923,6 +971,15 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
 
   // Initialize Room (Host or Guest)
   const initRoom = useCallback((targetRoomId: string, asHost: boolean) => {
+    // Sanitize Room ID: lowercase, alphanumeric and dashes only
+    const cleanRoomId = targetRoomId
+      .trim()
+      .toLowerCase()
+      .replace(/^cinesync-/, '')
+      .replace(/[^a-z0-9-]/g, '');
+
+    if (!cleanRoomId) return;
+
     if (peerRef.current) {
       peerRef.current.destroy();
       peerRef.current = null;
@@ -930,6 +987,10 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
     if (connectTimeoutRef.current) {
       clearTimeout(connectTimeoutRef.current);
       connectTimeoutRef.current = null;
+    }
+    if (retryTimeoutRef.current) {
+      clearTimeout(retryTimeoutRef.current);
+      retryTimeoutRef.current = null;
     }
     if (heartbeatIntervalRef.current) {
       clearInterval(heartbeatIntervalRef.current);
@@ -940,14 +1001,15 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
       statsIntervalRef.current = null;
     }
 
-    setRoomId(targetRoomId);
+    setRoomId(cleanRoomId);
     setIsHost(asHost);
+    isHostRef.current = asHost;
     setConnectionStatus('connecting');
-    setStatusMessage(asHost ? 'Generating room link...' : 'Connecting to friend across networks...');
+    setStatusMessage(asHost ? 'Opening watch room...' : 'Connecting to room...');
 
     const myId = asHost 
-      ? `cinesync-${targetRoomId}`
-      : `guest-${Math.random().toString(36).substring(2, 9)}`;
+      ? `cinesync-${cleanRoomId}`
+      : `guest-${cleanRoomId}-${Math.random().toString(36).substring(2, 9)}`;
 
     setCurrentUser((prev) => ({ 
       ...prev, 
@@ -967,6 +1029,34 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
       },
     });
 
+    let retryCount = 0;
+    const maxRetries = 6;
+
+    const attemptConnectToHost = () => {
+      const targetHostId = `cinesync-${cleanRoomId}`;
+      setHostPeerId(targetHostId);
+      console.log(`[P2P] Connecting to host: ${targetHostId} (attempt ${retryCount + 1})`);
+      
+      const conn = peer.connect(targetHostId, {
+        reliable: true,
+        metadata: { name: userName, device: getDeviceType() },
+      });
+      setupDataConnection(conn);
+
+      connectTimeoutRef.current = setTimeout(() => {
+        if (!connectionsRef.current.has(targetHostId) && retryCount < maxRetries) {
+          retryCount++;
+          setStatusMessage(`Waiting for host (${retryCount}/${maxRetries})...`);
+          attemptConnectToHost();
+        } else if (!connectionsRef.current.has(targetHostId)) {
+          setConnectionStatus('error');
+          setStatusMessage(
+            "Could not connect to host. Ensure the host created the room and check your network."
+          );
+        }
+      }, 4000);
+    };
+
     peer.on('open', (id) => {
       setPeerId(id);
       if (asHost) {
@@ -974,30 +1064,18 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
         setConnectionStatus('connected');
         setStatusMessage('Room ready. Share link or scan QR code!');
       } else {
-        const targetHostId = `cinesync-${targetRoomId}`;
-        setHostPeerId(targetHostId);
-        const conn = peer.connect(targetHostId, {
-          reliable: true,
-          metadata: { name: userName, device: getDeviceType() },
-        });
-        setupDataConnection(conn);
-
-        // Connection watchdog
-        connectTimeoutRef.current = setTimeout(() => {
-          if (!connectionsRef.current.has(targetHostId)) {
-            setConnectionStatus('error');
-            setStatusMessage(
-              "Couldn't connect to the host. Ensure the host is in the room and check your network connection."
-            );
-          }
-        }, CONNECT_TIMEOUT_MS);
+        attemptConnectToHost();
       }
 
       // Heartbeat ping interval keeps NAT bindings alive
       heartbeatIntervalRef.current = setInterval(() => {
         connectionsRef.current.forEach((c) => {
           if (c.open) {
-            c.send({ type: 'ping', timestamp: Date.now() });
+            try {
+              c.send({ type: 'ping', timestamp: Date.now() });
+            } catch {
+              // ignore
+            }
           }
         });
       }, 2500);
@@ -1009,6 +1087,7 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
     });
 
     peer.on('connection', (conn) => {
+      console.log(`[P2P] Incoming data connection from: ${conn.peer}`);
       setupDataConnection(conn);
     });
 
@@ -1023,6 +1102,7 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
 
     peer.on('call', (call) => {
       const type = call.metadata?.type || 'screen';
+      console.log(`[P2P] Incoming ${type} call from ${call.peer}`);
       call.answer();
 
       call.on('stream', (remoteStream) => {
@@ -1059,16 +1139,24 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
     peer.on('error', (err) => {
       console.error('Peer error:', err);
       if (err.type === 'peer-unavailable') {
-        setStatusMessage('Room not found. Check the code and try again.');
-        setConnectionStatus('error');
+        if (!asHost && retryCount < maxRetries) {
+          retryCount++;
+          setStatusMessage(`Connecting to host (${retryCount}/${maxRetries})...`);
+          retryTimeoutRef.current = setTimeout(attemptConnectToHost, 1500);
+        } else {
+          setStatusMessage('Room not found. Check the code and try again.');
+          setConnectionStatus('error');
+        }
       } else if (err.type === 'unavailable-id') {
-        // If host ID is temporarily cached in signaling server (e.g. rapid page reload), retry after 2s
-        setStatusMessage('Reclaiming room ID...');
+        // If host ID is already taken, someone is already hosting this room!
+        // Automatically switch to joining as a Guest so both users connect seamlessly!
+        console.log('[P2P] Room host already active. Joining as guest instead...');
+        setStatusMessage('Joining existing room...');
+        setIsHost(false);
+        isHostRef.current = false;
         setTimeout(() => {
-          if (asHost && !peer.destroyed) {
-            initRoom(targetRoomId, true);
-          }
-        }, 2000);
+          initRoom(cleanRoomId, false);
+        }, 300);
       } else {
         setStatusMessage(`Connection notice: ${err.type}`);
       }
@@ -1100,6 +1188,7 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
   useEffect(() => {
     const typingTimer = typingTimeoutRef;
     const connectTimer = connectTimeoutRef;
+    const retryTimer = retryTimeoutRef;
     const heartbeat = heartbeatIntervalRef;
     const stats = statsIntervalRef;
     const screenStream = localScreenStreamRef;
@@ -1109,6 +1198,7 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
     return () => {
       if (typingTimer.current) clearTimeout(typingTimer.current);
       if (connectTimer.current) clearTimeout(connectTimer.current);
+      if (retryTimer.current) clearTimeout(retryTimer.current);
       if (heartbeat.current) clearInterval(heartbeat.current);
       if (stats.current) clearInterval(stats.current);
       if (screenStream.current) screenStream.current.getTracks().forEach((t) => t.stop());

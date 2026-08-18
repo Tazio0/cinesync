@@ -50,6 +50,16 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
     return `${adj}-${noun}-${num}`;
   };
 
+  const extractCleanRoomId = (raw: string): string => {
+    let clean = raw.trim();
+    if (clean.includes('#room=')) {
+      clean = clean.split('#room=')[1]?.split('&')[0] || clean;
+    } else if (clean.includes('room=')) {
+      clean = clean.split('room=')[1]?.split('&')[0] || clean;
+    }
+    return clean.toLowerCase().replace(/^cinesync-/, '').replace(/[^a-z0-9-]/g, '');
+  };
+
   const handleCreateRoom = (e: React.FormEvent) => {
     e.preventDefault();
     const finalName = name.trim() || 'Movie Lover 🍿';
@@ -60,10 +70,11 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
 
   const handleJoinExisting = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!joinCode.trim()) return;
+    const cleanId = extractCleanRoomId(joinCode);
+    if (!cleanId) return;
     const finalName = name.trim() || 'Friend 🍿';
     localStorage.setItem('cinesync_username', finalName);
-    onJoinRoom(joinCode.trim().toLowerCase(), finalName, false);
+    onJoinRoom(cleanId, finalName, false);
   };
 
   return (

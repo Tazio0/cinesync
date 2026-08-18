@@ -14,13 +14,16 @@ export function App() {
   // Read room from URL hash or query params (e.g. #room=cosmic-party-123 or ?room=xyz)
   const getInitialRoomId = (): string => {
     try {
+      let raw = '';
       const hash = window.location.hash;
       if (hash.startsWith('#room=')) {
-        return hash.replace('#room=', '').trim();
+        raw = hash.replace('#room=', '').trim();
+      } else {
+        const params = new URLSearchParams(window.location.search);
+        const qRoom = params.get('room');
+        if (qRoom) raw = qRoom.trim();
       }
-      const params = new URLSearchParams(window.location.search);
-      const qRoom = params.get('room');
-      if (qRoom) return qRoom.trim();
+      return raw.toLowerCase().replace(/^cinesync-/, '').replace(/[^a-z0-9-]/g, '');
     } catch {
       // ignore
     }
