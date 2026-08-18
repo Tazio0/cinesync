@@ -1,0 +1,27 @@
+name: Deploy to Droplet
+
+on:
+  push:
+    branches: [ tazio0-improve-p2p-reliability ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run remote deploy via SSH
+        uses: appleboy/ssh-action@v0.1.9
+        with:
+          host: ${{ secrets.DROPLET_HOST }}
+          username: ${{ secrets.DROPLET_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.DROPLET_SSH_PORT || '22' }}
+          script: |
+            cd /opt/cinesync || git clone https://github.com/Tazio0/cinesync.git /opt/cinesync || true
+            cd /opt/cinesync || exit 1
+            git fetch --all
+            git reset --hard origin/tazio0-improve-p2p-reliability
+            docker compose -f docker/peer-turn-docker-compose.yml pull || true
+            docker compose -f docker/peer-turn-docker-compose.yml up -d

@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import type { StreamType, User, ConnectionStats } from '../types';
 import { soundFX } from '../utils/soundEffects';
+import { TurnModal } from './TurnModal';
 
 interface HeaderProps {
   roomId: string;
@@ -65,6 +66,7 @@ export const Header: React.FC<HeaderProps> = ({
   const [isMuted, setIsMuted] = useState<boolean>(soundFX.getMuted());
   const [copied, setCopied] = useState<boolean>(false);
   const [showParticipantsDropdown, setShowParticipantsDropdown] = useState<boolean>(false);
+  const [showNetworkModal, setShowNetworkModal] = useState<boolean>(false);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
 
   const toggleMute = () => {
@@ -79,6 +81,7 @@ export const Header: React.FC<HeaderProps> = ({
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
 
   // Close participants dropdown when clicking outside
   useEffect(() => {
@@ -165,6 +168,32 @@ export const Header: React.FC<HeaderProps> = ({
           <Activity size={12} />
           <span className="network-ping">{connectionStats.rtt ? `${connectionStats.rtt}ms` : 'P2P'}</span>
         </button>
+
+        {/* Configure custom TURN/STUN servers (opens modal) */}
+        <button
+          className="header-action-btn"
+          onClick={() => setShowNetworkModal(true)}
+          title="Configure custom TURN/STUN servers"
+        >
+          <Shield size={14} />
+          <span className="btn-label">Network</span>
+        </button>
+
+        {/* Force Relay toggle (uses localStorage cinesync_force_relay) */}
+        <button
+          className={`header-action-btn ${localStorage.getItem('cinesync_force_relay') ? 'active' : ''}`}
+          onClick={() => {
+            const cur = !!localStorage.getItem('cinesync_force_relay');
+            if (cur) localStorage.removeItem('cinesync_force_relay'); else localStorage.setItem('cinesync_force_relay', '1');
+            window.location.reload();
+          }}
+          title="Toggle Force TURN Relay (persisted locally)"
+        >
+          <Shield size={14} />
+          <span className="btn-label">Force Relay</span>
+        </button>
+
+        <TurnModal isOpen={showNetworkModal} onClose={() => setShowNetworkModal(false)} />
 
         <div className="stream-badge" style={{ borderColor: `${badge.color}33`, color: badge.color }}>
           {badge.icon}
