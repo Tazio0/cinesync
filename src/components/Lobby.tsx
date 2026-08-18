@@ -57,7 +57,7 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
     } else if (clean.includes('room=')) {
       clean = clean.split('room=')[1]?.split('&')[0] || clean;
     }
-    return clean.toLowerCase().replace(/^cinesync-/, '').replace(/[^a-z0-9-]/g, '');
+    return clean.toLowerCase().replace(/^cinesync[_-]/, '').replace(/[^a-z0-9-]/g, '');
   };
 
   const handleCreateRoom = (e: React.FormEvent) => {

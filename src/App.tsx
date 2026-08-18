@@ -23,7 +23,7 @@ export function App() {
         const qRoom = params.get('room');
         if (qRoom) raw = qRoom.trim();
       }
-      return raw.toLowerCase().replace(/^cinesync-/, '').replace(/[^a-z0-9-]/g, '');
+      return raw.toLowerCase().replace(/^cinesync[_-]/, '').replace(/[^a-z0-9-]/g, '');
     } catch {
       // ignore
     }
