@@ -14,6 +14,50 @@ const AVATAR_COLORS = [
   '#06B6D4', '#6366F1', '#EC4899', '#8B5CF6'
 ];
 
+// ICE servers used for every WebRTC connection this peer makes (chat/data
+// channel + screen share + camera calls).
+//
+// STUN-only (what this used to be) only lets two browsers connect directly
+// when at least one side's NAT allows hole-punching. It works fine for
+// quick same-network tests, then silently hangs on "Connecting..." the
+// moment one person is on a different network - mobile data, campus/office
+// wifi, most double-NAT home routers, etc. That's the exact bug being
+// fixed here: it needs a TURN relay as a fallback path so the connection
+// still succeeds by routing through a relay server when a direct route
+// isn't possible.
+//
+// The TURN entries below are the free, public OpenRelay service
+// (openrelayproject) - shared and bandwidth-limited, but zero setup, which
+// matches this app's "no backend, pure P2P" design. For heavier/more
+// reliable use, swap these for your own TURN credentials - a free personal
+// key from https://www.metered.ca/tools/openrelay/, Twilio Network
+// Traversal Service, Cloudflare Calls, or a self-hosted coturn box.
+const ICE_SERVERS: RTCIceServer[] = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:global.stun.twilio.com:3478' },
+  {
+    urls: 'turn:openrelay.metered.ca:80',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+];
+
+// How long to wait for the initial host<->guest connection to fully open
+// (ICE + DTLS handshake complete) before giving up and telling the user
+// what's wrong, instead of spinning on "Connecting..." forever.
+const CONNECT_TIMEOUT_MS = 20000;
+
 export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UsePeerRoomProps) {
   const [roomId, setRoomId] = useState<string>(initialRoomId || '');
   const [isHost, setIsHost] = useState<boolean>(isHostMode);
@@ -71,6 +115,7 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
   const screenCallsRef = useRef<Map<string, MediaConnection>>(new Map());
   const camCallsRef = useRef<Map<string, MediaConnection>>(new Map());
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const connectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isHostRef = useRef<boolean>(isHost);
   const currentUserRef = useRef<User>(currentUser);
 
@@ -300,6 +345,10 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
   // Setup connection handlers
   const setupDataConnection = useCallback((conn: DataConnection) => {
     conn.on('open', () => {
+      if (connectTimeoutRef.current) {
+        clearTimeout(connectTimeoutRef.current);
+        connectTimeoutRef.current = null;
+      }
       connectionsRef.current.set(conn.peer, conn);
       setIsConnected(true);
       setConnectionStatus('connected');
@@ -341,6 +390,23 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
     conn.on('error', (err) => {
       console.error('Data connection error:', err);
     });
+
+    // Track the underlying WebRTC ICE negotiation. This is what actually
+    // fails silently across networks without a TURN relay - now that one
+    // is configured this mostly just self-heals, but we still surface it
+    // and attempt an ICE restart so a mid-call network blip (wifi to
+    // mobile data, router hiccup, etc.) doesn't kill the session.
+    conn.on('iceStateChanged', (state) => {
+      console.log(`[ICE] connection to ${conn.peer}: ${state}`);
+      if (state === 'failed') {
+        conn.peerConnection?.restartIce?.();
+        setStatusMessage('Connection trouble, trying to recover...');
+      } else if (state === 'connected' || state === 'completed') {
+        if (connectionsRef.current.has(conn.peer)) {
+          setStatusMessage('Connected with friend');
+        }
+      }
+    });
   }, [handleDataReceived]);
 
   // Start Screen Sharing
@@ -379,6 +445,10 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
         if (peerRef.current) {
           const call = peerRef.current.call(targetPeerId, stream, {
             metadata: { type: 'screen' },
+          });
+          call.on('iceStateChanged', (state) => {
+            console.log(`[ICE] screen share to ${targetPeerId}: ${state}`);
+            if (state === 'failed') call.peerConnection?.restartIce?.();
           });
           screenCallsRef.current.set(targetPeerId, call);
         }
@@ -454,6 +524,10 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
           const call = peerRef.current.call(targetPeerId, stream, {
             metadata: { type: 'camera' },
           });
+          call.on('iceStateChanged', (state) => {
+            console.log(`[ICE] camera call to ${targetPeerId}: ${state}`);
+            if (state === 'failed') call.peerConnection?.restartIce?.();
+          });
           camCallsRef.current.set(targetPeerId, call);
         }
       });
@@ -467,6 +541,10 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
     if (peerRef.current) {
       peerRef.current.destroy();
       peerRef.current = null;
+    }
+    if (connectTimeoutRef.current) {
+      clearTimeout(connectTimeoutRef.current);
+      connectTimeoutRef.current = null;
     }
 
     setRoomId(targetRoomId);
@@ -483,10 +561,8 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
     const peer = new Peer(myId, {
       debug: 1,
       config: {
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:global.stun.twilio.com:3478' },
-        ],
+        iceServers: ICE_SERVERS,
+        iceCandidatePoolSize: 10,
       },
     });
 
@@ -504,11 +580,37 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
           metadata: { name: userName },
         });
         setupDataConnection(conn);
+
+        // Watchdog: if we never reach "open" - meaning even the TURN relay
+        // path couldn't get through (very rare, e.g. a network that blocks
+        // all outbound UDP/TCP relay traffic) - stop spinning forever and
+        // tell the user plainly instead of leaving them stuck on
+        // "Connecting...".
+        connectTimeoutRef.current = setTimeout(() => {
+          if (!connectionsRef.current.has(targetHostId)) {
+            setConnectionStatus('error');
+            setStatusMessage(
+              "Couldn't reach the host. Make sure they still have the room open in their browser, then try again - or try switching one side to a different network (e.g. a phone hotspot)."
+            );
+          }
+        }, CONNECT_TIMEOUT_MS);
       }
     });
 
     peer.on('connection', (conn) => {
       setupDataConnection(conn);
+    });
+
+    // The signalling (broker) connection can drop briefly on flaky
+    // networks without affecting already-established P2P connections.
+    // Reconnect it automatically instead of leaving the peer stranded.
+    peer.on('disconnected', () => {
+      console.warn('Lost connection to signalling server, attempting to reconnect...');
+      setTimeout(() => {
+        if (peerRef.current === peer && !peer.destroyed) {
+          peer.reconnect();
+        }
+      }, 1000);
     });
 
     peer.on('call', (call) => {
@@ -536,6 +638,11 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
           setRemoteScreenStream(null);
         }
       });
+
+      call.on('iceStateChanged', (state) => {
+        console.log(`[ICE] incoming ${type} call from ${call.peer}: ${state}`);
+        if (state === 'failed') call.peerConnection?.restartIce?.();
+      });
     });
 
     peer.on('error', (err) => {
@@ -557,6 +664,7 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
   useEffect(() => {
     return () => {
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      if (connectTimeoutRef.current) clearTimeout(connectTimeoutRef.current);
       if (localScreenStream) localScreenStream.getTracks().forEach((t) => t.stop());
       if (localCamStream) localCamStream.getTracks().forEach((t) => t.stop());
       if (peerRef.current) peerRef.current.destroy();
