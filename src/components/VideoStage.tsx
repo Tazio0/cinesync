@@ -27,6 +27,7 @@ import type {
   VideoViewMode 
 } from '../types';
 import { FloatingReactions } from './FloatingReactions';
+import { YouTubeSyncPlayer } from './YouTubeSyncPlayer';
 import { isScreenShareSupported } from '../utils/deviceInfo';
 
 interface VideoStageProps {
@@ -148,7 +149,7 @@ export const VideoStage: React.FC<VideoStageProps> = ({
     }
   }, [remoteCamStream]);
 
-  // Handle synchronized video state changes
+  // Handle synchronized video state changes (Direct Video URLs & Local Files)
   useEffect(() => {
     if (streamType === 'video' || streamType === 'local') {
       const vid = videoRef.current;
@@ -174,7 +175,7 @@ export const VideoStage: React.FC<VideoStageProps> = ({
     setShowControls(true);
     if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
     controlsTimeoutRef.current = setTimeout(() => {
-      if (isPlaying || streamType === 'screen') {
+      if (isPlaying || streamType === 'screen' || streamType === 'youtube') {
         setShowControls(false);
       }
     }, 3500);
@@ -295,18 +296,6 @@ export const VideoStage: React.FC<VideoStageProps> = ({
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
 
-  const getYouTubeEmbedUrl = (url: string) => {
-    let videoId = '';
-    if (url.includes('youtube.com/watch?v=')) {
-      videoId = url.split('v=')[1]?.split('&')[0] || '';
-    } else if (url.includes('youtu.be/')) {
-      videoId = url.split('youtu.be/')[1]?.split('?')[0] || '';
-    } else {
-      videoId = url;
-    }
-    return `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&enablejsapi=1&rel=0`;
-  };
-
   return (
     <div
       ref={containerRef}
@@ -351,6 +340,7 @@ export const VideoStage: React.FC<VideoStageProps> = ({
               ref={screenVideoRef}
               autoPlay
               playsInline
+              muted={isStreamingLocal || isMuted}
               className={`main-stream-video mode-${viewMode}`}
             />
 
@@ -519,14 +509,14 @@ export const VideoStage: React.FC<VideoStageProps> = ({
                   <button 
                     className="control-btn" 
                     onClick={cycleViewMode} 
-                    title={`View Mode: ${viewMode}`}
+                    title={`View Mode: ${viewMode.toUpperCase()}`}
                   >
                     <Layers size={17} />
                   </button>
                   <button 
                     className="control-btn" 
                     onClick={toggleFullscreen} 
-                    title="Fullscreen (Double click or F)"
+                    title="Fullscreen (F)"
                   >
                     {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
                   </button>
@@ -536,27 +526,16 @@ export const VideoStage: React.FC<VideoStageProps> = ({
           </div>
         )}
 
-        {/* 3. YOUTUBE SYNC */}
+        {/* 3. YOUTUBE SYNCHRONIZED PLAYER */}
         {streamType === 'youtube' && (
-          <div className="youtube-player-view">
-            <iframe
-              src={getYouTubeEmbedUrl(syncState.url)}
-              title="YouTube Watch Party"
-              className="youtube-iframe"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-              allowFullScreen
-            />
-            <div className={`screen-floating-controls ${showControls ? 'visible' : 'hidden'}`}>
-              <button 
-                className="screen-control-pill fullscreen-pill" 
-                onClick={toggleFullscreen}
-                title="Fullscreen (F)"
-              >
-                {isFullscreen ? <Minimize size={16} /> : <Maximize2 size={16} />}
-                <span>{isFullscreen ? 'Exit' : 'Fullscreen'}</span>
-              </button>
-            </div>
-          </div>
+          <YouTubeSyncPlayer
+            url={syncState.url}
+            syncState={syncState}
+            isHost={peers.length === 0 || peers[0]?.isHost === false}
+            onSyncAction={onSyncAction}
+            isFullscreen={isFullscreen}
+            onToggleFullscreen={toggleFullscreen}
+          />
         )}
 
         {/* 4. DUAL NETFLIX SYNC CONTROLLER */}

@@ -68,6 +68,7 @@ export function App() {
     startDualCountdown,
     startScreenShare,
     stopScreenShare,
+    startLocalFileStream,
     startCameraMainStream,
     toggleCamera,
   } = usePeerRoom({
@@ -132,13 +133,42 @@ export function App() {
 
   const handleSelectLocalFile = (file: File) => {
     const objectUrl = URL.createObjectURL(file);
-    sendSyncAction('change_source', {
-      type: 'local',
-      url: objectUrl,
-      title: file.name,
-      isPlaying: true,
-      currentTime: 0,
-    });
+    
+    // Create an audio/video stream from local file so remote peers can watch without downloading
+    const video = document.createElement('video');
+    video.src = objectUrl;
+    video.playsInline = true;
+    video.muted = true;
+    
+    video.onloadedmetadata = () => {
+      try {
+        const stream = (video as any).captureStream ? (video as any).captureStream() : (video as any).mozCaptureStream ? (video as any).mozCaptureStream() : null;
+        if (stream) {
+          video.play().then(() => {
+            startLocalFileStream(stream, file.name);
+          }).catch(() => {
+            sendSyncAction('change_source', {
+              type: 'local',
+              url: objectUrl,
+              title: file.name,
+              isPlaying: true,
+              currentTime: 0,
+            });
+          });
+          return;
+        }
+      } catch (e) {
+        console.warn('captureStream not available:', e);
+      }
+
+      sendSyncAction('change_source', {
+        type: 'local',
+        url: objectUrl,
+        title: file.name,
+        isPlaying: true,
+        currentTime: 0,
+      });
+    };
   };
 
   const handleSelectSampleMovie = (movie: SampleMedia) => {
@@ -201,8 +231,12 @@ export function App() {
   }
 
   return (
-    <div className={`app-root ${isTheaterMode ? 'theater-mode' : ''}`}>
-      {/* Top Navigation */}
+    <div
+      className={`cinesync-app-container ${
+        isTheaterMode ? 'theater-mode' : ''
+      } ${isChatCollapsed ? 'chat-collapsed' : ''}`}
+    >
+      {/* Top Navigation Bar */}
       <Header
         roomId={roomId || activeRoomId}
         isHost={isHost}

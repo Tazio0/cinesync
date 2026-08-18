@@ -741,10 +741,42 @@ input, textarea {
   justify-content: center;
 }
 
-.youtube-iframe {
+.youtube-iframe,
+.youtube-embed-wrapper,
+.youtube-iframe-target {
   width: 100%;
   height: 100%;
   border: none;
+  background: #000;
+  display: block;
+}
+
+.youtube-embed-wrapper {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.youtube-sync-header-pill {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.75rem;
+  background: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-full);
+  color: #ef4444;
+  font-size: 0.75rem;
+  font-weight: 600;
+  z-index: 10;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 
 /* Stream Overlay Info */

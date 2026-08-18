@@ -35,25 +35,25 @@ const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.cloudflare.com:3478' },
   { urls: 'stun:global.stun.twilio.com:3478' },
   { urls: 'stun:stun.nextcloud.com:443' },
+  { urls: 'stun:turn.matrix.org:3478' },
   
   // Public High-Performance TURN Relays (OpenRelay / Metered)
   {
-    urls: 'turn:openrelay.metered.ca:80',
+    urls: [
+      'turn:openrelay.metered.ca:80',
+      'turn:openrelay.metered.ca:80?transport=tcp',
+      'turn:openrelay.metered.ca:443',
+      'turn:openrelay.metered.ca:443?transport=tcp',
+    ],
     username: 'openrelayproject',
     credential: 'openrelayproject',
   },
   {
-    urls: 'turn:openrelay.metered.ca:443',
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
-  },
-  {
-    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
-  },
-  {
-    urls: 'turns:openrelay.metered.ca:443?transport=tcp',
+    urls: [
+      'turns:openrelay.metered.ca:443?transport=tcp',
+      'turns:openrelay.metered.ca:5349',
+      'turns:openrelay.metered.ca:5349?transport=tcp',
+    ],
     username: 'openrelayproject',
     credential: 'openrelayproject',
   },
@@ -179,6 +179,28 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
     return DEFAULT_ICE_SERVERS;
   }, []);
 
+  // Optimize WebRTC sender bitrate & framerate for high quality video streams
+  const optimizeMediaSender = (pc: RTCPeerConnection) => {
+    try {
+      const senders = pc.getSenders ? pc.getSenders() : [];
+      senders.forEach((sender) => {
+        if (sender.track?.kind === 'video') {
+          const params = sender.getParameters();
+          if (!params.encodings || params.encodings.length === 0) {
+            params.encodings = [{}];
+          }
+          // Set high-bitrate threshold for 1080p 60fps streaming across networks
+          params.encodings[0].maxBitrate = 4_500_000; // 4.5 Mbps
+          // Preserve framerate for fluid motion
+          params.degradationPreference = 'maintain-framerate';
+          sender.setParameters(params).catch(() => {});
+        }
+      });
+    } catch (e) {
+      console.warn('Could not optimize sender bitrate:', e);
+    }
+  };
+
   // Broadcast data payload to all open connections
   const broadcast = useCallback((data: PeerSignalData) => {
     connectionsRef.current.forEach((conn) => {
@@ -207,6 +229,9 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
           console.log(`[ICE] screen call to ${targetPeerId}: ${state}`);
           if (state === 'failed') screenCall.peerConnection?.restartIce?.();
         });
+        if (screenCall.peerConnection) {
+          optimizeMediaSender(screenCall.peerConnection);
+        }
         screenCallsRef.current.set(targetPeerId, screenCall);
       }
     }
@@ -272,7 +297,7 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
     });
   }, [broadcast]);
 
-  // Sync Action Handler
+  // Sync Action Handler (Play, Pause, Seek, Change Source)
   const sendSyncAction = useCallback((action: 'play' | 'pause' | 'seek' | 'change_source', updatedState: Partial<SyncMediaState>) => {
     const newState: SyncMediaState = {
       ...syncStateRef.current,
@@ -300,25 +325,19 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
 
     const interval = setInterval(() => {
       current -= 1;
-      if (current > 0) {
+      if (current >= 0) {
         setCountdown({ active: true, count: current, initiator: currentUserRef.current.name });
-        soundFX.playCountdownBeep(false);
+        soundFX.playCountdownBeep(current === 0);
         broadcast({ type: 'dual_countdown', active: true, count: current, initiator: currentUserRef.current.name });
-      } else if (current === 0) {
-        setCountdown({ active: true, count: 0, initiator: currentUserRef.current.name });
-        soundFX.playCountdownBeep(true);
-        broadcast({ type: 'dual_countdown', active: true, count: 0, initiator: currentUserRef.current.name });
       } else {
         clearInterval(interval);
-        setTimeout(() => {
-          setCountdown({ active: false, count: 0, initiator: '' });
-          broadcast({ type: 'dual_countdown', active: false, count: 0, initiator: '' });
-        }, 1200);
+        setCountdown({ active: false, count: 0, initiator: '' });
+        broadcast({ type: 'dual_countdown', active: false, count: 0, initiator: '' });
       }
     }, 1000);
   }, [broadcast]);
 
-  // Handle incoming data payload
+  // Handle incoming data channel messages
   const handleDataReceived = useCallback((data: PeerSignalData, conn: DataConnection) => {
     switch (data.type) {
       case 'ping':
@@ -327,12 +346,9 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
 
       case 'pong': {
         const rtt = Math.max(1, Date.now() - data.originTimestamp);
-        setCurrentUser((prev) => ({ ...prev, ping: rtt }));
-        setConnectionStats((prev) => ({
-          ...prev,
-          rtt,
-          networkQuality: rtt < 100 ? 'excellent' : rtt < 220 ? 'good' : rtt < 450 ? 'fair' : 'poor',
-        }));
+        setPeers((prev) =>
+          prev.map((p) => (p.id === conn.peer ? { ...p, ping: rtt } : p))
+        );
         break;
       }
 
@@ -341,37 +357,37 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
         soundFX.playMessageSound();
         break;
 
-      case 'reaction':
-        setReactions((prev) => [
-          ...prev.slice(-25),
-          {
-            id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-            emoji: data.emoji,
-            senderName: data.senderName,
-            x: 15 + Math.random() * 70,
-            scale: 0.9 + Math.random() * 0.4,
-            rotation: (Math.random() - 0.5) * 30,
-          },
-        ]);
+      case 'reaction': {
+        const newReaction: ReactionItem = {
+          id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+          emoji: data.emoji,
+          senderName: data.senderName,
+          x: 15 + Math.random() * 70,
+          scale: 0.9 + Math.random() * 0.4,
+          rotation: (Math.random() - 0.5) * 30,
+        };
+        setReactions((prev) => [...prev.slice(-25), newReaction]);
         soundFX.playReactionSound();
         break;
+      }
 
       case 'typing':
-        if (data.isTyping) {
-          setTypingUsers((prev) => Array.from(new Set([...prev, data.userName])));
-        } else {
-          setTypingUsers((prev) => prev.filter((name) => name !== data.userName));
-        }
+        setTypingUsers((prev) => {
+          if (data.isTyping && !prev.includes(data.userName)) {
+            return [...prev, data.userName];
+          }
+          if (!data.isTyping) {
+            return prev.filter((name) => name !== data.userName);
+          }
+          return prev;
+        });
         break;
 
       case 'user_joined':
         setPeers((prev) => {
-          const exists = prev.some((p) => p.id === data.user.id);
-          if (!exists) {
-            soundFX.playJoinSound();
-            return [...prev, data.user];
-          }
-          return prev.map((p) => (p.id === data.user.id ? { ...p, ...data.user } : p));
+          if (prev.some((p) => p.id === data.user.id)) return prev;
+          soundFX.playJoinSound();
+          return [...prev, data.user];
         });
 
         // Add system message
@@ -400,7 +416,9 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
         });
 
         // If we are actively sharing our screen or camera, call this newly joined peer immediately!
-        callPeerWithActiveStreams(conn.peer);
+        setTimeout(() => {
+          callPeerWithActiveStreams(conn.peer);
+        }, 300);
         break;
 
       case 'user_update':
@@ -429,7 +447,9 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
           fullState: syncStateRef.current,
         });
         if (localScreenStreamRef.current || localCamStreamRef.current) {
-          callPeerWithActiveStreams(conn.peer);
+          setTimeout(() => {
+            callPeerWithActiveStreams(conn.peer);
+          }, 300);
         }
         break;
 
@@ -520,33 +540,38 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
           rtt: currentRtt || prev.rtt,
           fps: fps || prev.fps,
           resolution: resolution !== '0x0' ? resolution : prev.resolution,
-          bytesReceived: bytesRecv,
-          bytesSent: bytesSent,
+          bytesReceived: bytesRecv || prev.bytesReceived,
+          bytesSent: bytesSent || prev.bytesSent,
           isRelayed: isRelay,
-          networkQuality: (currentRtt || prev.rtt) < 120 ? 'excellent' : (currentRtt || prev.rtt) < 250 ? 'good' : 'fair',
-        }));
-
-        setCurrentUser((prev) => ({
-          ...prev,
-          networkType: isRelay ? 'relay' : 'direct',
+          networkQuality:
+            currentRtt > 250
+              ? 'poor'
+              : currentRtt > 120
+              ? 'fair'
+              : currentRtt > 50
+              ? 'good'
+              : 'excellent',
         }));
       }).catch(() => {});
     });
   }, []);
 
-  // Setup connection handlers
+  // Setup PeerJS Data Connection
   const setupDataConnection = useCallback((conn: DataConnection) => {
+    connectionsRef.current.set(conn.peer, conn);
+
     conn.on('open', () => {
-      if (connectTimeoutRef.current) {
-        clearTimeout(connectTimeoutRef.current);
-        connectTimeoutRef.current = null;
-      }
-      connectionsRef.current.set(conn.peer, conn);
+      console.log(`[P2P] Data connection opened with: ${conn.peer}`);
       setIsConnected(true);
       setConnectionStatus('connected');
       setStatusMessage('Connected with friend');
 
-      // Send local user profile
+      if (connectTimeoutRef.current) {
+        clearTimeout(connectTimeoutRef.current);
+        connectTimeoutRef.current = null;
+      }
+
+      // Send initial join payload
       conn.send({
         type: 'user_joined',
         user: currentUserRef.current,
@@ -558,8 +583,10 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
         requestedBy: currentUserRef.current.id,
       });
 
-      // If we are sharing screen, immediately call this peer
-      callPeerWithActiveStreams(conn.peer);
+      // If we are sharing screen, call this peer
+      setTimeout(() => {
+        callPeerWithActiveStreams(conn.peer);
+      }, 300);
     });
 
     conn.on('data', (data) => {
@@ -589,7 +616,7 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
     // Handle ICE negotiation & auto-recovery
     conn.on('iceStateChanged', (state) => {
       console.log(`[ICE] Connection with ${conn.peer}: ${state}`);
-      if (state === 'failed') {
+      if (state === 'failed' || state === 'disconnected') {
         conn.peerConnection?.restartIce?.();
         setStatusMessage('Connection blip, auto-recovering...');
       } else if (state === 'connected' || state === 'completed') {
@@ -629,14 +656,20 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
     });
   }, [broadcast]);
 
-  // Start Screen Sharing
+  // Start Screen Sharing with resilient Progressive Fallback
   const startScreenShare = useCallback(async (options?: { frameRate?: number; audio?: boolean }) => {
     if (!isScreenShareSupported()) {
-      return { success: false, error: 'Screen sharing is not supported on this mobile browser. Try Desktop or use Mobile Camera Stream!' };
+      return { 
+        success: false, 
+        error: 'Screen sharing is not supported on this browser. Use Desktop or Mobile Camera Stream!' 
+      };
     }
 
+    let stream: MediaStream | null = null;
+
+    // Progressive attempt 1: High quality 1080p 60fps with tab audio
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({
+      stream = await navigator.mediaDevices.getDisplayMedia({
         video: {
           displaySurface: 'browser',
           frameRate: { ideal: options?.frameRate || 60, max: 60 },
@@ -649,61 +682,139 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
           autoGainControl: false,
         } : false,
       });
-
-      setLocalScreenStream(stream);
-      localScreenStreamRef.current = stream;
-
-      const hasAudioTrack = stream.getAudioTracks().length > 0;
-
-      const newSyncState: SyncMediaState = {
-        ...syncStateRef.current,
-        type: 'screen',
-        title: 'Live Screen / Netflix Stream',
-        isPlaying: true,
-        streamerId: currentUserRef.current.id,
-        streamerName: currentUserRef.current.name,
-        hasAudio: hasAudioTrack,
-        timestamp: Date.now(),
-      };
-      setSyncState(newSyncState);
-      setCurrentUser((prev) => ({ ...prev, isScreenSharing: true }));
-
-      broadcast({
-        type: 'stream_status',
-        streamType: 'screen',
-        isLive: true,
-        streamerId: currentUserRef.current.id,
-        streamerName: currentUserRef.current.name,
-        title: 'Live Screen Stream',
-        hasAudio: hasAudioTrack,
-      });
-
-      // Call all connected peers
-      connectionsRef.current.forEach((_, targetPeerId) => {
-        if (peerRef.current) {
-          const call = peerRef.current.call(targetPeerId, stream, {
-            metadata: { type: 'screen', senderName: currentUserRef.current.name },
+    } catch {
+      // Progressive attempt 2: Standard video + audio without audio constraints
+      try {
+        stream = await navigator.mediaDevices.getDisplayMedia({
+          video: { frameRate: { ideal: 60 } },
+          audio: true,
+        });
+      } catch {
+        // Progressive attempt 3: Video only (e.g. system window or non-audio browser window)
+        try {
+          stream = await navigator.mediaDevices.getDisplayMedia({
+            video: true,
           });
-          if (call) {
-            call.on('iceStateChanged', (state) => {
-              if (state === 'failed') call.peerConnection?.restartIce?.();
-            });
-            screenCallsRef.current.set(targetPeerId, call);
-          }
+        } catch (finalErr) {
+          console.warn('Screen share cancelled or rejected:', finalErr);
+          return { success: false, error: (finalErr as Error).message || 'Screen share cancelled' };
         }
-      });
-
-      const videoTrack = stream.getVideoTracks()[0];
-      if (videoTrack) {
-        videoTrack.onended = () => {
-          stopScreenShare();
-        };
       }
+    }
 
-      return { success: true, hasAudio: hasAudioTrack };
-    } catch (err) {
-      console.warn('Screen share cancelled or failed:', err);
-      return { success: false, error: (err as Error).message || 'Cancelled' };
+    if (!stream) {
+      return { success: false, error: 'Could not obtain media stream' };
+    }
+
+    setLocalScreenStream(stream);
+    localScreenStreamRef.current = stream;
+
+    const hasAudioTrack = stream.getAudioTracks().length > 0;
+
+    const newSyncState: SyncMediaState = {
+      ...syncStateRef.current,
+      type: 'screen',
+      title: 'Live Screen / Netflix Stream',
+      isPlaying: true,
+      streamerId: currentUserRef.current.id,
+      streamerName: currentUserRef.current.name,
+      hasAudio: hasAudioTrack,
+      timestamp: Date.now(),
+    };
+    setSyncState(newSyncState);
+    setCurrentUser((prev) => ({ ...prev, isScreenSharing: true }));
+
+    broadcast({
+      type: 'stream_status',
+      streamType: 'screen',
+      isLive: true,
+      streamerId: currentUserRef.current.id,
+      streamerName: currentUserRef.current.name,
+      title: 'Live Screen Stream',
+      hasAudio: hasAudioTrack,
+    });
+
+    // Call all connected peers
+    connectionsRef.current.forEach((_, targetPeerId) => {
+      if (peerRef.current) {
+        const call = peerRef.current.call(targetPeerId, stream, {
+          metadata: { type: 'screen', senderName: currentUserRef.current.name },
+        });
+        if (call) {
+          call.on('iceStateChanged', (state) => {
+            if (state === 'failed') call.peerConnection?.restartIce?.();
+          });
+          if (call.peerConnection) {
+            optimizeMediaSender(call.peerConnection);
+          }
+          screenCallsRef.current.set(targetPeerId, call);
+        }
+      }
+    });
+
+    const videoTrack = stream.getVideoTracks()[0];
+    if (videoTrack) {
+      videoTrack.onended = () => {
+        stopScreenShare();
+      };
+    }
+
+    return { success: true, hasAudio: hasAudioTrack };
+  }, [broadcast, stopScreenShare]);
+
+  // Start Local Video File Stream over WebRTC (so remote peers don't need the file)
+  const startLocalFileStream = useCallback((stream: MediaStream, title: string) => {
+    setLocalScreenStream(stream);
+    localScreenStreamRef.current = stream;
+
+    const hasAudioTrack = stream.getAudioTracks().length > 0;
+
+    const newSyncState: SyncMediaState = {
+      ...syncStateRef.current,
+      type: 'screen',
+      title: title || 'Local Video Stream',
+      isPlaying: true,
+      streamerId: currentUserRef.current.id,
+      streamerName: currentUserRef.current.name,
+      hasAudio: hasAudioTrack,
+      timestamp: Date.now(),
+    };
+    setSyncState(newSyncState);
+    setCurrentUser((prev) => ({ ...prev, isScreenSharing: true }));
+
+    broadcast({
+      type: 'stream_status',
+      streamType: 'screen',
+      isLive: true,
+      streamerId: currentUserRef.current.id,
+      streamerName: currentUserRef.current.name,
+      title: title || 'Local Video Stream',
+      hasAudio: hasAudioTrack,
+    });
+
+    // Call all connected peers with captured video stream
+    connectionsRef.current.forEach((_, targetPeerId) => {
+      if (peerRef.current) {
+        const call = peerRef.current.call(targetPeerId, stream, {
+          metadata: { type: 'screen', senderName: currentUserRef.current.name },
+        });
+        if (call) {
+          call.on('iceStateChanged', (state) => {
+            if (state === 'failed') call.peerConnection?.restartIce?.();
+          });
+          if (call.peerConnection) {
+            optimizeMediaSender(call.peerConnection);
+          }
+          screenCallsRef.current.set(targetPeerId, call);
+        }
+      }
+    });
+
+    const videoTrack = stream.getVideoTracks()[0];
+    if (videoTrack) {
+      videoTrack.onended = () => {
+        stopScreenShare();
+      };
     }
   }, [broadcast, stopScreenShare]);
 
@@ -882,14 +993,14 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
         }, CONNECT_TIMEOUT_MS);
       }
 
-      // Heartbeat ping interval
+      // Heartbeat ping interval keeps NAT bindings alive
       heartbeatIntervalRef.current = setInterval(() => {
         connectionsRef.current.forEach((c) => {
           if (c.open) {
             c.send({ type: 'ping', timestamp: Date.now() });
           }
         });
-      }, 3000);
+      }, 2500);
 
       // WebRTC stats interval
       statsIntervalRef.current = setInterval(() => {
@@ -939,7 +1050,9 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
 
       call.on('iceStateChanged', (state) => {
         console.log(`[ICE] Incoming ${type} call: ${state}`);
-        if (state === 'failed') call.peerConnection?.restartIce?.();
+        if (state === 'failed' || state === 'disconnected') {
+          call.peerConnection?.restartIce?.();
+        }
       });
     });
 
@@ -964,12 +1077,25 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
     peerRef.current = peer;
   }, [getActiveIceServers, setupDataConnection, updateWebRTCStats, userName]);
 
-  // Manual reconnect helper
+  // Reconnection helper
   const reconnect = useCallback(() => {
     if (roomId) {
       initRoom(roomId, isHostRef.current);
     }
   }, [roomId, initRoom]);
+
+  // Handle browser online/offline auto-recovery
+  useEffect(() => {
+    const handleOnline = () => {
+      console.log('Network back online. Checking connection...');
+      if (peerRef.current && peerRef.current.disconnected) {
+        peerRef.current.reconnect();
+      }
+    };
+
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, []);
 
   useEffect(() => {
     const typingTimer = typingTimeoutRef;
@@ -1020,8 +1146,8 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
     startDualCountdown,
     startScreenShare,
     stopScreenShare,
+    startLocalFileStream,
     startCameraMainStream,
     toggleCamera,
-    setSyncState,
   };
 }
