@@ -116,8 +116,9 @@ export const VideoStage: React.FC<VideoStageProps> = ({
     const vid = screenVideoRef.current;
     if (vid) {
       if (activeScreenStream) {
-        vid.srcObject = activeScreenStream;
-        // On iOS Safari / Chrome, unmuted autoplay can reject with NotAllowedError
+        if (vid.srcObject !== activeScreenStream) {
+          vid.srcObject = activeScreenStream;
+        }
         const playPromise = vid.play();
         if (playPromise !== undefined) {
           playPromise
@@ -134,7 +135,36 @@ export const VideoStage: React.FC<VideoStageProps> = ({
         setNeedsAutoplayTap(false);
       }
     }
-  }, [activeScreenStream]);
+  }, [activeScreenStream, streamType]);
+
+  const bindScreenVideoRef = (node: HTMLVideoElement | null) => {
+    screenVideoRef.current = node;
+    if (node && activeScreenStream) {
+      if (node.srcObject !== activeScreenStream) {
+        node.srcObject = activeScreenStream;
+      }
+      node.play().then(() => {
+        setNeedsAutoplayTap(false);
+      }).catch((err) => {
+        console.warn('Autoplay prevented:', err);
+        setNeedsAutoplayTap(true);
+      });
+    }
+  };
+
+  const bindLocalCamRef = (node: HTMLVideoElement | null) => {
+    localCamRef.current = node;
+    if (node && localCamStream) {
+      node.srcObject = localCamStream;
+    }
+  };
+
+  const bindRemoteCamRef = (node: HTMLVideoElement | null) => {
+    remoteCamRef.current = node;
+    if (node && remoteCamStream) {
+      node.srcObject = remoteCamStream;
+    }
+  };
 
   // Bind webcam streams
   useEffect(() => {
@@ -337,7 +367,7 @@ export const VideoStage: React.FC<VideoStageProps> = ({
         {streamType === 'screen' && (
           <div className="screen-stream-view">
             <video
-              ref={screenVideoRef}
+              ref={bindScreenVideoRef}
               autoPlay
               playsInline
               muted={isStreamingLocal || isMuted}
@@ -639,13 +669,13 @@ export const VideoStage: React.FC<VideoStageProps> = ({
         <div className="webcam-pip-container">
           {remoteCamStream && (
             <div className="cam-pip-box remote-cam">
-              <video ref={remoteCamRef} autoPlay playsInline className="pip-video" />
+              <video ref={bindRemoteCamRef} autoPlay playsInline className="pip-video" />
               <span className="pip-label">{peers[0]?.name || 'Friend'}</span>
             </div>
           )}
           {localCamStream && (
             <div className="cam-pip-box local-cam">
-              <video ref={localCamRef} autoPlay playsInline muted className="pip-video" />
+              <video ref={bindLocalCamRef} autoPlay playsInline muted className="pip-video" />
               <span className="pip-label">You</span>
             </div>
           )}
