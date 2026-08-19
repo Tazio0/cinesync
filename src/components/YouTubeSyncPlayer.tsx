@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Play, Pause, Volume2, VolumeX, Maximize2, Minimize, RotateCcw, RotateCw, Sparkles, Square } from 'lucide-react';
 import type { SyncMediaState } from '../types';
 
@@ -23,36 +23,30 @@ const extractYouTubeVideoId = (url: string): string => {
   if (!url) return '';
   const trimmed = url.trim();
   
-  // Direct 11-char ID
   if (/^[a-zA-Z0-9_-]{11}$/.test(trimmed)) {
     return trimmed;
   }
   
-  // Standard URLs: youtube.com/watch?v=...
   if (trimmed.includes('watch?v=') || trimmed.includes('watch?')) {
     const match = trimmed.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
     if (match && match[1]) return match[1];
   }
   
-  // Shortened URLs: youtu.be/...
   if (trimmed.includes('youtu.be/')) {
     const match = trimmed.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/);
     if (match && match[1]) return match[1];
   }
   
-  // Embed URLs: youtube.com/embed/...
   if (trimmed.includes('/embed/')) {
     const match = trimmed.match(/\/embed\/([a-zA-Z0-9_-]{11})/);
     if (match && match[1]) return match[1];
   }
   
-  // Shorts URLs: youtube.com/shorts/...
   if (trimmed.includes('/shorts/')) {
     const match = trimmed.match(/\/shorts\/([a-zA-Z0-9_-]{11})/);
     if (match && match[1]) return match[1];
   }
 
-  // Live stream URLs: youtube.com/live/...
   if (trimmed.includes('/live/')) {
     const match = trimmed.match(/\/live\/([a-zA-Z0-9_-]{11})/);
     if (match && match[1]) return match[1];
@@ -70,8 +64,9 @@ export const YouTubeSyncPlayer: React.FC<YouTubeSyncPlayerProps> = ({
   onStopMedia,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const playerWrapperRef = useRef<HTMLDivElement | null>(null);
   const playerRef = useRef<any>(null);
-  const playerId = useRef(`yt-player-${Math.random().toString(36).substring(2, 9)}`);
+  const playerIdRef = useRef<string>(`yt-player-${Math.random().toString(36).substring(2, 9)}`);
   
   const [isPlayerReady, setIsPlayerReady] = useState<boolean>(false);
   const [isPlaying, setIsPlaying] = useState<boolean>(syncState.isPlaying);
@@ -85,28 +80,31 @@ export const YouTubeSyncPlayer: React.FC<YouTubeSyncPlayerProps> = ({
   const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isInternalUpdateRef = useRef<boolean>(false);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const currentVideoIdRef = useRef<string>('');
 
   const videoId = extractYouTubeVideoId(url);
 
-  const initPlayer = () => {
+  const initPlayer = useCallback(() => {
     if (!videoId) return;
 
-    if (playerRef.current && playerRef.current.destroy) {
-      try {
-        playerRef.current.destroy();
-      } catch {
-        // ignore
-      }
+    // Ensure target DOM container exists
+    let playerElement = document.getElementById(playerIdRef.current);
+    if (!playerElement && playerWrapperRef.current) {
+      playerElement = document.createElement('div');
+      playerElement.id = playerIdRef.current;
+      playerElement.className = 'youtube-iframe-target';
+      playerWrapperRef.current.appendChild(playerElement);
     }
 
-    const playerElement = document.getElementById(playerId.current);
-    if (!playerElement) return;
+    if (!playerElement || !window.YT || !window.YT.Player) return;
 
-    playerRef.current = new window.YT.Player(playerId.current, {
+    currentVideoIdRef.current = videoId;
+
+    playerRef.current = new window.YT.Player(playerIdRef.current, {
       videoId,
       playerVars: {
         autoplay: syncState.isPlaying ? 1 : 0,
-        controls: 0, // Use our sleek synchronized custom UI controls
+        controls: 0,
         disablekb: 0,
         enablejsapi: 1,
         modestbranding: 1,
@@ -145,7 +143,6 @@ export const YouTubeSyncPlayer: React.FC<YouTubeSyncPlayerProps> = ({
           if (isInternalUpdateRef.current) return;
 
           const state = event.data;
-          // YT.PlayerState: -1 = unstarted, 0 = ended, 1 = playing, 2 = paused, 3 = buffering, 5 = cued
           if (state === 1) { // PLAYING
             setIsPlaying(true);
             const curr = event.target.getCurrentTime();
@@ -173,10 +170,27 @@ export const YouTubeSyncPlayer: React.FC<YouTubeSyncPlayerProps> = ({
         },
       },
     });
-  };
+  }, [videoId, onSyncAction, syncState.currentTime, syncState.isPlaying]);
 
   // Load YouTube IFrame API script
   useEffect(() => {
+    if (!videoId) return;
+
+    if (playerRef.current && isPlayerReady && currentVideoIdRef.current !== videoId) {
+      currentVideoIdRef.current = videoId;
+      try {
+        if (typeof playerRef.current.loadVideoById === 'function') {
+          playerRef.current.loadVideoById({
+            videoId,
+            startSeconds: syncState.currentTime || 0,
+          });
+          return;
+        }
+      } catch {
+        // fallback to re-init
+      }
+    }
+
     if (window.YT && window.YT.Player) {
       initPlayer();
       return;
@@ -195,9 +209,12 @@ export const YouTubeSyncPlayer: React.FC<YouTubeSyncPlayerProps> = ({
       const firstScriptTag = document.getElementsByTagName('script')[0];
       firstScriptTag?.parentNode?.insertBefore(tag, firstScriptTag);
     }
+  }, [videoId, isPlayerReady, initPlayer, syncState.currentTime]);
 
+  // Unmount cleanup
+  useEffect(() => {
     return () => {
-      if (playerRef.current && playerRef.current.destroy) {
+      if (playerRef.current && typeof playerRef.current.destroy === 'function') {
         try {
           playerRef.current.destroy();
         } catch {
@@ -207,9 +224,11 @@ export const YouTubeSyncPlayer: React.FC<YouTubeSyncPlayerProps> = ({
       if (pollIntervalRef.current) {
         clearInterval(pollIntervalRef.current);
       }
+      if (controlsTimeoutRef.current) {
+        clearTimeout(controlsTimeoutRef.current);
+      }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [videoId]);
+  }, []);
 
   // Poll current time & duration regularly
   useEffect(() => {
@@ -348,8 +367,8 @@ export const YouTubeSyncPlayer: React.FC<YouTubeSyncPlayerProps> = ({
       onMouseMove={handleMouseMove}
     >
       {/* YouTube Embedded Player */}
-      <div className="youtube-embed-wrapper">
-        <div id={playerId.current} className="youtube-iframe-target" />
+      <div ref={playerWrapperRef} className="youtube-embed-wrapper">
+        <div id={playerIdRef.current} className="youtube-iframe-target" />
       </div>
 
       {/* Sync Badge */}

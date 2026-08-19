@@ -523,6 +523,7 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
           setLocalScreenStream(null);
           localScreenStreamRef.current = null;
         }
+        setRemoteScreenStream(null);
         screenCallsRef.current.forEach((c) => c.close());
         screenCallsRef.current.clear();
         setCurrentUser((prev) => ({ ...prev, isScreenSharing: false }));
@@ -697,6 +698,20 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
       screenCallsRef.current.delete(conn.peer);
       camCallsRef.current.delete(conn.peer);
       setPeers((prev) => prev.filter((p) => p.id !== conn.peer));
+
+      if (syncStateRef.current.streamerId === conn.peer) {
+        setRemoteScreenStream(null);
+        setSyncState((prev) => ({
+          ...prev,
+          type: 'idle',
+          title: '',
+          isPlaying: false,
+          streamerId: '',
+          streamerName: '',
+          hasAudio: false,
+        }));
+      }
+
       if (connectionsRef.current.size === 0) {
         setIsConnected(false);
         setStatusMessage('Waiting for friend to connect...');
@@ -705,6 +720,7 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
 
     conn.on('error', (err) => {
       console.warn('Data connection error:', err);
+      connectionsRef.current.delete(conn.peer);
     });
 
     conn.on('iceStateChanged', (state) => {
