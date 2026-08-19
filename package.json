@@ -4,18 +4,22 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently -k \"node server/signaling-server.mjs\" \"vite --host 0.0.0.0\"",
+    "dev:app": "vite --host 0.0.0.0",
+    "dev:server": "node server/signaling-server.mjs",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview"
   },
   "dependencies": {
     "@types/qrcode.react": "^1.0.5",
+    "concurrently": "^9.1.0",
     "lucide-react": "^1.31.0",
     "peerjs": "^1.5.5",
     "qrcode.react": "^4.2.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "ws": "^8.18.1"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

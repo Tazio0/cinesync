@@ -2,10 +2,19 @@ export type StreamType = 'screen' | 'video' | 'youtube' | 'local' | 'dual_sync' 
 
 export type DeviceType = 'desktop' | 'mobile' | 'tablet';
 
+export interface UserProfile {
+  name: string;
+  avatarColor: string;
+  avatarEmoji?: string;
+  avatarImage?: string | null;
+}
+
 export interface User {
   id: string;
   name: string;
   avatarColor: string;
+  avatarEmoji?: string;
+  avatarImage?: string | null;
   isHost: boolean;
   isAudioOn?: boolean;
   isVideoOn?: boolean;
@@ -20,6 +29,8 @@ export interface ChatMessage {
   senderId: string;
   senderName: string;
   avatarColor: string;
+  avatarEmoji?: string;
+  avatarImage?: string | null;
   text: string;
   timestamp: number;
   type: 'text' | 'system' | 'sync';

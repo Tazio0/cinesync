@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: cinesync-signal
+    env: node
+    plan: free
+    region: oregon
+    buildCommand: npm install
+    startCommand: node server/signaling-server.mjs
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: 10000

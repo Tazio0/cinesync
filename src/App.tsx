@@ -8,7 +8,7 @@ import { RoomModal } from './components/RoomModal';
 import { NetflixGuideModal } from './components/NetflixGuideModal';
 import { MediaSelectModal } from './components/MediaSelectModal';
 import { ConnectionStatsModal } from './components/ConnectionStatsModal';
-import type { SampleMedia } from './types';
+import type { SampleMedia, UserProfile } from './types';
 
 export function App() {
   // Read room from URL hash or query params (e.g. #room=cosmic-party-123 or ?room=xyz)
@@ -32,6 +32,11 @@ export function App() {
 
   const [activeRoomId, setActiveRoomId] = useState<string>(getInitialRoomId());
   const [userName, setUserName] = useState<string>('Movie Lover 🍿');
+  const [userProfile, setUserProfile] = useState<UserProfile>({
+    name: 'Movie Lover 🍿',
+    avatarColor: '#E50914',
+    avatarEmoji: '🍿',
+  });
   const [isInRoom, setIsInRoom] = useState<boolean>(false);
   const [isHostMode, setIsHostMode] = useState<boolean>(true);
 
@@ -78,6 +83,7 @@ export function App() {
     kickPeer,
   } = usePeerRoom({
     userName,
+    profile: userProfile,
     initialRoomId: activeRoomId,
     isHostMode,
   });
@@ -95,13 +101,24 @@ export function App() {
   }, [messages, isChatCollapsed, currentUser.id]);
 
   // Handle joining room from lobby
-  const handleJoinFromLobby = (newRoomId: string, name: string, asHost: boolean) => {
+  const handleJoinFromLobby = (
+    newRoomId: string,
+    name: string,
+    asHost: boolean,
+    profile?: UserProfile,
+  ) => {
+    const nextProfile = profile ?? {
+      name,
+      avatarColor: '#E50914',
+      avatarEmoji: '🍿',
+    };
+
     setUserName(name);
+    setUserProfile(nextProfile);
     setActiveRoomId(newRoomId);
     setIsHostMode(asHost);
     setIsInRoom(true);
 
-    // Update URL hash smoothly for sharing
     window.location.hash = `#room=${newRoomId}`;
 
     initRoom(newRoomId, asHost);

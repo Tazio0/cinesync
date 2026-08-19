@@ -80,6 +80,18 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
+  const renderAvatarContent = (senderName: string, avatarEmoji?: string, avatarImage?: string | null) => {
+    if (avatarImage) {
+      return <img src={avatarImage} alt={senderName} />;
+    }
+
+    if (avatarEmoji) {
+      return <span>{avatarEmoji}</span>;
+    }
+
+    return <span>{senderName.charAt(0).toUpperCase()}</span>;
+  };
+
   return (
     <aside className={`chat-sidebar ${isCollapsed ? 'collapsed' : ''}`}>
       {/* Collapsed floating toggle pill */}
@@ -195,9 +207,9 @@ export const ChatSidebar: React.FC<ChatSidebarProps> = ({
                     {!isMe && (
                       <div
                         className="msg-avatar"
-                        style={{ backgroundColor: msg.avatarColor || '#6366F1' }}
+                        style={{ backgroundColor: msg.avatarImage ? 'transparent' : (msg.avatarColor || '#6366F1') }}
                       >
-                        {msg.senderName.charAt(0).toUpperCase()}
+                        {renderAvatarContent(msg.senderName, msg.avatarEmoji, msg.avatarImage)}
                       </div>
                     )}
                     <div className="msg-content-block">

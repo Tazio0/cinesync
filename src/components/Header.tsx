@@ -126,6 +126,18 @@ export const Header: React.FC<HeaderProps> = ({
     }
   };
 
+  const renderAvatarContent = (user: User) => {
+    if (user.avatarImage) {
+      return <img src={user.avatarImage} alt={user.name} />;
+    }
+
+    if (user.avatarEmoji) {
+      return <span>{user.avatarEmoji}</span>;
+    }
+
+    return <span>{user.name.charAt(0).toUpperCase()}</span>;
+  };
+
   const handleKickClick = (peerId: string, peerName: string) => {
     if (window.confirm(`Are you sure you want to remove ${peerName} from the watch party?`)) {
       if (onKickPeer) onKickPeer(peerId);
@@ -182,19 +194,19 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <div 
               className="user-avatar-small" 
-              style={{ backgroundColor: currentUser.avatarColor }}
+              style={{ backgroundColor: currentUser.avatarImage ? 'transparent' : currentUser.avatarColor }}
               title={`${currentUser.name} (You)`}
             >
-              {currentUser.name.charAt(0).toUpperCase()}
+              {renderAvatarContent(currentUser)}
             </div>
             {peers.map((peer) => (
               <div
                 key={peer.id}
                 className="user-avatar-small"
-                style={{ backgroundColor: peer.avatarColor }}
+                style={{ backgroundColor: peer.avatarImage ? 'transparent' : peer.avatarColor }}
                 title={`${peer.name}`}
               >
-                {peer.name.charAt(0).toUpperCase()}
+                {renderAvatarContent(peer)}
               </div>
             ))}
             <div className="users-count-tag">
@@ -212,8 +224,8 @@ export const Header: React.FC<HeaderProps> = ({
               <div className="popover-list">
                 {/* You */}
                 <div className="popover-user-row">
-                  <div className="popover-avatar" style={{ backgroundColor: currentUser.avatarColor }}>
-                    {currentUser.name.charAt(0).toUpperCase()}
+                  <div className="popover-avatar" style={{ backgroundColor: currentUser.avatarImage ? 'transparent' : currentUser.avatarColor }}>
+                    {renderAvatarContent(currentUser)}
                   </div>
                   <div className="popover-user-info">
                     <div className="user-name-line">
@@ -242,12 +254,11 @@ export const Header: React.FC<HeaderProps> = ({
                   peers.map((peer) => (
                     <div key={peer.id} className="popover-user-row">
                       <div className="popover-avatar" style={{ backgroundColor: peer.avatarColor }}>
-                        {peer.name.charAt(0).toUpperCase()}
+                        {renderAvatarContent(peer)}
                       </div>
                       <div className="popover-user-info">
                         <div className="user-name-line">
-                          <span className="user-name-text">{peer.name}</span>
-                          {peer.isHost && (
+                          <span className="user-name-text">{peer.name}</span>                          {peer.isHost && (
                             <span className="host-pill" title="Room Host">
                               <Shield size={10} />
                               <span>Host</span>

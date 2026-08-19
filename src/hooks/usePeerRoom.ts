@@ -14,6 +14,7 @@ import { getDeviceType, isScreenShareSupported } from '../utils/deviceInfo';
 
 interface UsePeerRoomProps {
   userName: string;
+  profile?: Partial<User>;
   initialRoomId?: string;
   isHostMode?: boolean;
 }
@@ -61,7 +62,7 @@ const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
   },
 ];
 
-export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UsePeerRoomProps) {
+export function usePeerRoom({ userName, profile, initialRoomId, isHostMode = true }: UsePeerRoomProps) {
   const [roomId, setRoomId] = useState<string>(initialRoomId || '');
   const [isHost, setIsHost] = useState<boolean>(isHostMode);
   const [isConnected, setIsConnected] = useState<boolean>(false);
@@ -74,7 +75,9 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
   const [currentUser, setCurrentUser] = useState<User>({
     id: '',
     name: userName,
-    avatarColor: AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)],
+    avatarColor: profile?.avatarColor || AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)],
+    avatarEmoji: profile?.avatarEmoji || '🍿',
+    avatarImage: profile?.avatarImage || null,
     isHost: isHostMode,
     isAudioOn: false,
     isVideoOn: false,
@@ -149,6 +152,7 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
   const cleanRoomIdRef = useRef<string>('');
   const isHostRef = useRef<boolean>(isHost);
   const currentUserRef = useRef<User>(currentUser);
+  const roomSignalRef = useRef<WebSocket | null>(null);
   const localScreenStreamRef = useRef<MediaStream | null>(null);
   const localCamStreamRef = useRef<MediaStream | null>(null);
   const syncStateRef = useRef<SyncMediaState>(syncState);
@@ -202,6 +206,14 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
     }
   };
 
+  const signalRoom = useCallback((payload: Record<string, unknown>) => {
+    if (!roomId || !roomSignalRef.current || roomSignalRef.current.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    roomSignalRef.current.send(JSON.stringify({ roomId, ...payload }));
+  }, [roomId]);
+
   // Broadcast data payload to all open connections
   const broadcast = useCallback((data: PeerSignalData) => {
     connectionsRef.current.forEach((conn) => {
@@ -213,7 +225,14 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
         }
       }
     });
-  }, []);
+
+    if (data.type === 'chat') {
+      signalRoom({ type: 'chat-message', message: data.message });
+    }
+    if (data.type === 'reaction') {
+      signalRoom({ type: 'reaction-message', emoji: data.emoji, senderName: data.senderName });
+    }
+  }, [signalRoom]);
 
   // Call peer with local active stream (screen or cam)
   const callPeerWithActiveStreams = useCallback((targetPeerId: string) => {
@@ -266,8 +285,9 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
 
     setReactions((prev) => [...prev.slice(-25), newReaction]);
     soundFX.playReactionSound();
+    signalRoom({ type: 'reaction-message', emoji, senderName: currentUserRef.current.name });
     broadcast({ type: 'reaction', emoji, senderName: currentUserRef.current.name });
-  }, [broadcast]);
+  }, [broadcast, signalRoom]);
 
   // Send chat message
   const sendMessage = useCallback((text: string) => {
@@ -277,6 +297,8 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
       senderId: currentUserRef.current.id,
       senderName: currentUserRef.current.name,
       avatarColor: currentUserRef.current.avatarColor,
+      avatarEmoji: currentUserRef.current.avatarEmoji,
+      avatarImage: currentUserRef.current.avatarImage,
       text: text.trim(),
       timestamp: Date.now(),
       type: 'text',
@@ -285,8 +307,9 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
 
     setMessages((prev) => [...prev, msg]);
     soundFX.playMessageSound();
+    signalRoom({ type: 'chat-message', message: msg });
     broadcast({ type: 'chat', message: msg });
-  }, [broadcast]);
+  }, [broadcast, signalRoom]);
 
   // Send typing indicator
   const sendTyping = useCallback((isTyping: boolean) => {
@@ -1328,6 +1351,85 @@ export function usePeerRoom({ userName, initialRoomId, isHostMode = true }: UseP
       initRoom(cleanRoomIdRef.current, isHostRef.current);
     }
   }, [initRoom]);
+
+  useEffect(() => {
+    if (!roomId) {
+      roomSignalRef.current?.close();
+      roomSignalRef.current = null;
+      return;
+    }
+
+    const configuredSignalUrl =
+      typeof import.meta !== 'undefined'
+        ? (import.meta.env.VITE_SIGNAL_URL as string | undefined)
+        : undefined;
+
+    const fallbackSignalUrl = (() => {
+      const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+      return `${protocol}://${window.location.host}/ws`;
+    })();
+
+    const socket = new WebSocket(configuredSignalUrl || fallbackSignalUrl);
+    roomSignalRef.current = socket;
+
+    socket.addEventListener('open', () => {
+      socket.send(
+        JSON.stringify({
+          type: 'join-room',
+          roomId,
+          user: {
+            ...currentUserRef.current,
+            id: currentUserRef.current.id || `${roomId}-${crypto.randomUUID?.() ?? Date.now()}`,
+          },
+        }),
+      );
+    });
+
+    socket.addEventListener('message', (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+
+        if (payload.type === 'room-members') {
+          const members = Array.isArray(payload.members) ? payload.members : [];
+          setPeers(() => {
+            const mapped = members
+              .filter((member: User) => member.id !== currentUserRef.current.id)
+              .map((member: User) => ({
+                ...member,
+                avatarColor: member.avatarColor || '#6366F1',
+                avatarEmoji: member.avatarEmoji || '🍿',
+              }));
+            return mapped;
+          });
+          return;
+        }
+
+        if (payload.type === 'chat-message') {
+          setMessages((prev) => [...prev, payload.message]);
+          return;
+        }
+
+        if (payload.type === 'reaction-message') {
+          const reaction: ReactionItem = {
+            id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+            emoji: payload.emoji,
+            senderName: payload.senderName,
+            x: 15 + Math.random() * 70,
+            scale: 0.9 + Math.random() * 0.4,
+            rotation: (Math.random() - 0.5) * 30,
+          };
+          setReactions((prev) => [...prev.slice(-25), reaction]);
+        }
+      } catch {
+        // ignore malformed signaling messages
+      }
+    });
+
+    return () => {
+      socket.close();
+      roomSignalRef.current = null;
+    };
+  }, [roomId]);
 
   // Handle browser online/offline auto-recovery
   useEffect(() => {

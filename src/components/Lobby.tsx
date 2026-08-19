@@ -7,13 +7,15 @@ import {
   Zap, 
   MessageSquare,
   Smartphone,
-  Laptop
+  Laptop,
+  ImagePlus
 } from 'lucide-react';
 import { getDeviceType } from '../utils/deviceInfo';
+import type { UserProfile } from '../types';
 
 interface LobbyProps {
   initialRoomId?: string;
-  onJoinRoom: (roomId: string, name: string, isHost: boolean) => void;
+  onJoinRoom: (roomId: string, name: string, isHost: boolean, profile?: UserProfile) => void;
 }
 
 const DEFAULT_NAMES = [
@@ -29,6 +31,13 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
     return localStorage.getItem('cinesync_username') || DEFAULT_NAMES[Math.floor(Math.random() * DEFAULT_NAMES.length)];
   });
   const [selectedColor, setSelectedColor] = useState<string>(COLOR_CHOICES[0]);
+  const [selectedEmoji, setSelectedEmoji] = useState<string>(() => {
+    const saved = localStorage.getItem('cinesync_avatar_emoji');
+    return saved || '🍿';
+  });
+  const [avatarImage, setAvatarImage] = useState<string | null>(() => {
+    return localStorage.getItem('cinesync_avatar_image');
+  });
   const [joinCode, setJoinCode] = useState<string>(initialRoomId || '');
   const [isJoiningWithCode, setIsJoiningWithCode] = useState<boolean>(!!initialRoomId);
 
@@ -64,8 +73,19 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
     e.preventDefault();
     const finalName = name.trim() || 'Movie Lover 🍿';
     localStorage.setItem('cinesync_username', finalName);
+    localStorage.setItem('cinesync_avatar_emoji', selectedEmoji);
+    if (avatarImage) {
+      localStorage.setItem('cinesync_avatar_image', avatarImage);
+    } else {
+      localStorage.removeItem('cinesync_avatar_image');
+    }
     const newRoomId = generateRandomRoomId();
-    onJoinRoom(newRoomId, finalName, true);
+    onJoinRoom(newRoomId, finalName, true, {
+      name: finalName,
+      avatarColor: selectedColor,
+      avatarEmoji: selectedEmoji,
+      avatarImage,
+    });
   };
 
   const handleJoinExisting = (e: React.FormEvent) => {
@@ -74,7 +94,33 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
     if (!cleanId) return;
     const finalName = name.trim() || 'Friend 🍿';
     localStorage.setItem('cinesync_username', finalName);
-    onJoinRoom(cleanId, finalName, false);
+    localStorage.setItem('cinesync_avatar_emoji', selectedEmoji);
+    if (avatarImage) {
+      localStorage.setItem('cinesync_avatar_image', avatarImage);
+    } else {
+      localStorage.removeItem('cinesync_avatar_image');
+    }
+    onJoinRoom(cleanId, finalName, false, {
+      name: finalName,
+      avatarColor: selectedColor,
+      avatarEmoji: selectedEmoji,
+      avatarImage,
+    });
+  };
+
+  const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : null;
+      setAvatarImage(result);
+      if (result) {
+        localStorage.setItem('cinesync_avatar_image', result);
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
   return (
@@ -119,10 +165,14 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
               <div className="name-input-row">
                 <div 
                   className="avatar-preview-badge" 
-                  style={{ backgroundColor: selectedColor }}
+                  style={{ backgroundColor: avatarImage ? 'transparent' : selectedColor, border: avatarImage ? '1px solid rgba(255,255,255,0.12)' : 'none' }}
                   title="Your Avatar"
                 >
-                  {(name.trim() || 'A').charAt(0).toUpperCase()}
+                  {avatarImage ? (
+                    <img src={avatarImage} alt="Selected avatar" />
+                  ) : (
+                    <span>{selectedEmoji || (name.trim() || 'A').charAt(0).toUpperCase()}</span>
+                  )}
                 </div>
                 <input
                   id="user-name-input"
@@ -133,6 +183,26 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
                   className="lobby-name-input"
                   maxLength={24}
                 />
+              </div>
+
+              <div className="emoji-picker-row">
+                <span className="color-label">Avatar Icon:</span>
+                <div className="emoji-dots-group">
+                  {['🍿', '🎬', '🎉', '🌙', '🔥', '✨', '😎', '👾'].map((emoji) => (
+                    <button
+                      key={emoji}
+                      type="button"
+                      className={`emoji-dot-btn ${selectedEmoji === emoji ? 'selected' : ''}`}
+                      onClick={() => {
+                        setSelectedEmoji(emoji);
+                        setAvatarImage(null);
+                      }}
+                      aria-label={`Select emoji ${emoji}`}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {/* Avatar Color Picker */}
@@ -150,6 +220,14 @@ export const Lobby: React.FC<LobbyProps> = ({ initialRoomId, onJoinRoom }) => {
                     />
                   ))}
                 </div>
+              </div>
+
+              <div className="avatar-upload-row">
+                <label className="avatar-upload-label" htmlFor="avatar-upload">
+                  <ImagePlus size={14} />
+                  Upload image
+                </label>
+                <input id="avatar-upload" type="file" accept="image/*" onChange={handleAvatarUpload} />
               </div>
             </div>
 
